@@ -1,0 +1,10 @@
+services:
+  zot:
+    image: ghcr.io/project-zot/zot:latest
+    container_name: zot
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - /srv/homelab/zot/zot-data:/var/lib/registry
+      - ../../../config/zot/config.json:/etc/zot/config.json:ro

@@ -1,0 +1,30 @@
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/var/lib/registry"
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "5000",
+    "compat": ["docker2s2"]
+  },
+  "log": {
+    "level": "info"
+  },
+  "extensions": {
+    "ui": {
+      "enable": true
+  },
+    "scrub": {
+      "enable": true,
+      "interval": "24h"
+    },
+    "search": {
+      "enable": true,
+      "cve": {
+        "updateInterval": "2h"
+      }
+    }
+
+  }
+}
