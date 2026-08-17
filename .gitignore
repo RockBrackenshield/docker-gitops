@@ -1,0 +1,213 @@
+# ============================================================
+# Operating system / editor artifacts
+# ============================================================
+
+# Linux
+*~
+.directory
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+
+# Editors / IDEs
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*.swn
+
+# ============================================================
+# Ansible
+# ============================================================
+
+# Ansible retry files
+*.retry
+
+# Ansible local execution artifacts
+.ansible/
+ansible/.ansible/
+
+# Ansible Vault password files
+.vault_pass
+.vault_password
+.vault-password
+*.vault_pass
+
+# Temporary Ansible files
+ansible-tmp/
+ansible-cache/
+
+# ============================================================
+# Secrets / credentials
+# ============================================================
+
+# IMPORTANT:
+# SOPS-encrypted files (*.sops.yaml, *.sops.json, etc.) SHOULD
+# be committed to Git.
+#
+# Ignore only plaintext/local secret material.
+
+*.secret
+*.secret.yaml
+*.secret.yml
+*.secret.json
+
+*.credentials
+*.credentials.yaml
+*.credentials.yml
+*.credentials.json
+
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Local age identity/private key
+age-key.txt
+age-identity.txt
+*.agekey
+*.agekey.txt
+
+# Common private-key formats
+*.pem
+*.key
+
+# Don't accidentally commit SSH private keys
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+id_ecdsa
+id_ecdsa.*
+
+# ============================================================
+# Docker / Compose
+# ============================================================
+
+# Local Compose environment overrides
+docker-compose.override.yml
+compose.override.yaml
+compose.local.yaml
+
+# Docker-generated/local state
+docker-data/
+docker-volumes/
+
+# Local Docker logs if generated into the repository
+*.container.log
+*.docker.log
+
+# ============================================================
+# Runtime / application data
+# ============================================================
+
+# Persistent application data should live outside the repo.
+data/
+_data/
+runtime/
+_runtime/
+state/
+_state/
+
+# Common application-generated directories
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# ============================================================
+# Backups
+# ============================================================
+
+# Never store backup repositories/snapshots in Git
+backups/
+backup/
+*.backup
+*.bak
+
+# Kopia local cache/config generated outside the intended
+# infrastructure configuration
+.kopia/
+kopia-cache/
+
+# ============================================================
+# Certificates / TLS material
+# ============================================================
+
+# Generated certificates and private keys
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+
+# CA/private key material
+ca.key
+ca.pem
+server.key
+server.pem
+
+# ============================================================
+# Generated configuration
+# ============================================================
+
+# Temporary/generated files
+generated/
+generated-config/
+rendered/
+dist/
+build/
+
+# Terraform, if introduced later
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+.terraform.tfstate.lock.info
+
+# ============================================================
+# Python
+# ============================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+.venv/
+venv/
+env/
+ENV/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ============================================================
+# Miscellaneous local tooling
+# ============================================================
+
+# Local shell/session files
+*.local
+*.local.yaml
+*.local.yml
+*.local.json
+
+# Backup files created by editors/tools
+*.orig
+*.rej
+*.bak
