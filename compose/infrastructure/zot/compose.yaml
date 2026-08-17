@@ -6,5 +6,5 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - /srv/homelab/zot/zot-data:/var/lib/registry
+      - /srv/homelab/zot/data:/var/lib/registry
       - ../../../config/zot/config.json:/etc/zot/config.json:ro
