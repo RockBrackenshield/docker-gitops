@@ -1,0 +1,40 @@
+# compose.yaml
+#
+# Docker Compose equivalent of the k3s-gitops/infrastructure/adguard
+# manifests (Namespace, PVC, Deployment, Services, IngressRoutes,
+# ReplicationSource). Read the "Not replicated here" notes at the bottom —
+# a handful of things in the cluster deployment are cluster infrastructure
+# rather than AdGuard Home configuration and don't have a Compose analog.
+
+services:
+  adguard-home:
+    image: adguard/adguardhome:v0.107.77  # latest stable release as of 2026-08-17 (release date 2026-06-02) — check https://github.com/AdguardTeam/AdGuardHome/releases before bumping
+    container_name: adguard-home
+    hostname: adguard-home
+    restart: unless-stopped
+    pull_policy: always                   # ~ imagePullPolicy: Always
+
+    environment:
+      TZ: America/Chicago
+
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "80:80/tcp"
+      # First-run setup wizard below.
+      - "3000:3000/tcp"
+
+    volumes:
+      - /srv/homelab/adguard/adguard-conf:/opt/adguardhome/conf
+      - /srv/homelab/adguard/adguard-work:/opt/adguardhome/work
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:80/ || exit 1"]
+      interval: 10s     # ~ readinessProbe.periodSeconds
+      timeout: 5s
+      retries: 3        # ~ failureThreshold
+      start_period: 30s # ~ livenessProbe.initialDelaySeconds
+
+    cpus: 0.50          # ~ limits.cpu: 500m
+    mem_limit: 256m     # ~ limits.memory: 256Mi
+    mem_reservation: 64m # ~ requests.memory: 64Mi
