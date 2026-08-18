@@ -3,6 +3,8 @@ services:
     image: ghcr.io/project-zot/zot:latest
     container_name: zot
     restart: unless-stopped
+    cpus: 1.5
+    mem_limit: 2g
     ports:
       - "5000:5000"
     volumes:
