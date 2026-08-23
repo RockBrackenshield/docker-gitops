@@ -39,8 +39,7 @@ services:
       - traefik.http.routers.dashboard.service=api@internal
       - traefik.http.routers.dashboard.middlewares=dashboard-auth
       - traefik.http.middlewares.dashboard-auth.basicauth.usersfile=/etc/traefik/dashboard-users.htpasswd
-      - traefik.http.routers.dashboard.tls.domains[0].main=hermnet.org
-      - traefik.http.routers.dashboard.tls.domains[0].sans=*.hermnet.org
+      - traefik.http.routers.dashboard.tls.domains[0].main=*.hermnet.org
 
 networks:
   traefik_proxy:
