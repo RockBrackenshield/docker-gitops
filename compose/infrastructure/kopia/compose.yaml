@@ -1,0 +1,53 @@
+services:
+  kopia:
+    image: kopia/kopia:20260623.0.3052
+    container_name: kopia-server
+    restart: unless-stopped
+
+    command:
+      - server
+      - start
+      - --address=0.0.0.0:51515
+      - --tls-cert-file=/app/certs/kopia-server.crt
+      - --tls-key-file=/app/certs/kopia-server.key
+      - --config-file=/app/config/repository.config
+      - --cache-directory=/app/cache
+      - --no-check-for-updates
+
+    environment:
+      TZ: ${TZ:-America/Detroit}
+
+    volumes:
+      - /srv/homelab/kopia_server/config:/app/config
+      - /srv/homelab/kopia_server/cache:/app/cache
+      - /srv/homelab/kopia_server/logs:/app/logs
+      - /srv/homelab/kopia_server/certs:/app/certs:ro
+
+    networks:
+      - traefik
+
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.kopia.rule=Host(`kopia.hermnet.org`)
+      - traefik.http.routers.kopia.entrypoints=websecure
+      - traefik.http.routers.kopia.tls=true
+      - traefik.http.services.kopia.loadbalancer.server.port=51515
+      - traefik.http.services.kopia.loadbalancer.server.scheme=https
+      - traefik.http.serversTransports.kopia-transport.insecureSkipVerify=true
+      - traefik.http.services.kopia.loadbalancer.serverstransport=kopia-transport
+      - traefik.http.routers.kopia.service=kopia
+
+    healthcheck:
+      test:
+        - CMD
+        - kopia
+        - server
+        - status
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  traefik:
+    external: true

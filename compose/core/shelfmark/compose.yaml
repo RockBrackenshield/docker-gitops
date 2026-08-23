@@ -1,0 +1,27 @@
+services:
+  shelfmark-lite:
+    image: ghcr.io/calibrain/shelfmark-lite:latest
+    container_name: shelfmark-lite
+    environment:
+      EXT_BYPASSER_URL: http://flaresolverr:8191
+      PUID: 1000
+      PGID: 1000
+    ports:
+      - 8084:8084
+    restart: unless-stopped
+    volumes:
+      - /srv/homelab/shelfmark/books:/books # Default destination for book downloads
+      - /srv/homelab/shelfmark/config:/config # App configuration
+      # Required for torrent / usenet - path must match your download client's volume exactly
+      # - /path/to/downloads:/path/to/downloads
+
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.shelfmark.rule=Host(`shelfmark.hermnet.org`)
+      - traefik.http.routers.shelfmark.entrypoints=websecure
+      - traefik.http.routers.shelfmark.tls=true
+      - traefik.http.services.shelfmark.loadbalancer.server.port=8084
+      - traefik.http.services.shelfmark.loadbalancer.server.scheme=https
+      - traefik.http.serversTransports.shelfmark-transport.insecureSkipVerify=true
+      - traefik.http.services.shelf.loadbalancer.serverstransport=shelfmark-transport
+      - traefik.http.routers.shelfmark.service=shelfmark

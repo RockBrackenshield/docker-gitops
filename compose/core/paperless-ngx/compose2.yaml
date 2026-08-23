@@ -1,0 +1,131 @@
+# Docker Compose file for running paperless-ngx against an externally
+# managed PostgreSQL instance (run by another stack on the same host).
+#
+# Changes from the stock compose file:
+#   - The local `db` service and `pgdata` volume have been removed.
+#   - webserver is joined to the external Postgres stack's Docker network
+#     so it can reach the `db` container by name. See the `networks`
+#     section at the bottom - update `name:` to match the actual network
+#     created by your other stack (find it with `docker network ls`).
+#   - PAPERLESS_CONSUMER_RECURSIVE, PAPERLESS_CONSUMER_POLLING and
+#     PAPERLESS_CONSUMER_SUBDIRS_AS_TAGS are set per your request.
+#   - Two extra named volumes (CIFS/SMB and NFS) are mounted as
+#     sub-directories of the consume folder.
+#
+# To install and update paperless with this file, do the following:
+#
+# - Copy this file as 'docker-compose.yml' and the file
+#   'docker-compose.env' into a folder.
+# - Update the placeholders below (network name, DB credentials, SMB/NFS
+#   share details).
+# - Run 'docker compose pull'.
+# - Run 'docker compose up -d'.
+#
+# For more extensive installation and update instructions, refer to the
+# documentation.
+services:
+  broker:
+    image: docker.io/valkey/valkey:9-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    restart: unless-stopped
+    depends_on:
+      - broker
+      - gotenberg
+      - tika
+    ports:
+      - "8000:8000"
+    volumes:
+      - data:/usr/src/paperless/data
+      - media:/usr/src/paperless/media
+      - ./export:/usr/src/paperless/export
+      - ./consume:/usr/src/paperless/consume
+      # Extra network shares, mounted as sub-directories of consume/.
+      # Files dropped in these show up as consume/printer-smb and
+      # consume/network-nfs inside the container.
+      - consume-smb:/usr/src/paperless/consume/printer-smb
+      - consume-nfs:/usr/src/paperless/consume/network-nfs
+    env_file: docker-compose.env
+    environment:
+      PAPERLESS_REDIS: redis://broker:6379
+
+      # --- External PostgreSQL (managed by another compose stack) ---
+      # PAPERLESS_DBHOST must resolve to the postgres container. This works
+      # because webserver is attached to the other stack's network below.
+      # If you'd rather not share a Docker network, replace PAPERLESS_DBHOST
+      # with `host.docker.internal`, add:
+      #   extra_hosts:
+      #     - "host.docker.internal:host-gateway"
+      # to this service, and make sure the other stack publishes Postgres'
+      # port to the host.
+      PAPERLESS_DBENGINE: postgresql
+      PAPERLESS_DBHOST: db                # container/service name of the other stack's postgres
+      PAPERLESS_DBPORT: 5432
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_DBPASS: paperless
+      # PAPERLESS_DBSSLMODE: prefer
+
+      PAPERLESS_TIKA_ENABLED: 1
+      PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://gotenberg:3000
+      PAPERLESS_TIKA_ENDPOINT: http://tika:9998
+
+      # --- Consumer behavior ---
+      PAPERLESS_CONSUMER_RECURSIVE: true
+      # Polling is required here anyway: inotify (the default watcher)
+      # generally does NOT see change events reliably on CIFS/SMB or NFS
+      # mounts, so without polling, files dropped on the network shares
+      # below may never get picked up. 30s is a reasonable default; lower
+      # it if you want faster pickup at the cost of more disk I/O.
+      PAPERLESS_CONSUMER_POLLING: 30
+      PAPERLESS_CONSUMER_SUBDIRS_AS_TAGS: true
+
+    networks:
+      - default
+      - postgres_net
+
+  gotenberg:
+    image: docker.io/gotenberg/gotenberg:8.34
+    restart: unless-stopped
+    # The gotenberg chromium route is used to convert .eml files. We do not
+    # want to allow external content like tracking pixels or even javascript.
+    command:
+      - "gotenberg"
+      - "--chromium-disable-javascript=true"
+      - "--chromium-allow-list=file:///tmp/.*"
+
+  tika:
+    image: docker.io/apache/tika:latest
+    restart: unless-stopped
+
+volumes:
+  data:
+  media:
+  redisdata:
+
+  # --- SMB/CIFS share mounted at consume/printer-smb ---
+  consume-smb:
+    driver_opts:
+      type: cifs
+      o: "username=CHANGEME,password=CHANGEME,vers=3.0,uid=1000,gid=1000,iocharset=utf8"
+      device: "//printer-host/share-name"
+
+  # --- NFS share mounted at consume/network-nfs ---
+  consume-nfs:
+    driver_opts:
+      type: nfs
+      o: "addr=nfs-server-ip,rw,nfsvers=4,soft"
+      device: ":/path/to/export"
+
+networks:
+  default: {}
+  # This must be an existing network created by the other stack that runs
+  # Postgres (Docker Compose typically names it "<projectfolder>_default").
+  # Find it with `docker network ls`, then set `name:` below to match.
+  postgres_net:
+    external: true
+    name: CHANGEME_postgres_stack_network

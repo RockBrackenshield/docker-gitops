@@ -1,0 +1,37 @@
+creation_rules:
+# General Secrets
+  - path_regex: ^secrets/core/.*\.sops\.yaml$
+    age:
+      - age1pqywwqukuqw85q8gfsey9xwpn8z8z6xm56k0anjvel78d3h7pd6qqnqrdl # Admin Station
+      - <core-public-key> # Core Services Node
+
+  - path_regex: ^secrets/infrastructure/.*\.sops\.yaml$
+    age:
+      - age12q44h9tvww2c2epzxt6dmngcjvsg0rlepamndpr8k9vanxxxaeqqxq5gnc # Infrastructure Node
+      - age1pqywwqukuqw85q8gfsey9xwpn8z8z6xm56k0anjvel78d3h7pd6qqnqrdl # Admin Station
+
+  - path_regex: ^secrets/monitoring/.*\.sops\.yaml$
+    age:
+      - <monitoring-public-key> # Monitoring Node
+      - age1pqywwqukuqw85q8gfsey9xwpn8z8z6xm56k0anjvel78d3h7pd6qqnqrdl # Admin Station
+
+# Ansible Inventories
+  - path_regex: ^ansible/inventories/homelab/group_vars/kopia_server_hosts/.*\.sops\.ya?ml$
+    age:
+          - age12q44h9tvww2c2epzxt6dmngcjvsg0rlepamndpr8k9vanxxxaeqqxq5gnc # Infrastructure Node
+          - age1pqywwqukuqw85q8gfsey9xwpn8z8z6xm56k0anjvel78d3h7pd6qqnqrdl # Admin Station
+
+  - path_regex: ^ansible/inventories/homelab/host_vars/core/.*\.sops\.ya?ml$
+    age:
+          - <core-public-key> # Core Services Node
+          - age1pqywwqukuqw85q8gfsey9xwpn8z8z6xm56k0anjvel78d3h7pd6qqnqrdl # Admin Station
+
+  - path_regex: ^ansible/inventories/homelab/host_vars/infrastructure/.*\.sops\.ya?ml$
+    age:
+          - age12q44h9tvww2c2epzxt6dmngcjvsg0rlepamndpr8k9vanxxxaeqqxq5gnc # Infrastructure Node
+          - age1pqywwqukuqw85q8gfsey9xwpn8z8z6xm56k0anjvel78d3h7pd6qqnqrdl # Admin Station
+
+  - path_regex: ^ansible/inventories/homelab/host_vars/monitoring/.*\.sops\.ya?ml$
+    age:
+          - <monitoring-public-key> # Monitoring Node
+          - age1pqywwqukuqw85q8gfsey9xwpn8z8z6xm56k0anjvel78d3h7pd6qqnqrdl # Admin Station
