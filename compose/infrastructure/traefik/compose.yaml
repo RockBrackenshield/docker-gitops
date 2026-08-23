@@ -17,7 +17,7 @@ services:
       - --certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare
       - --certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53
       - --certificatesresolvers.cloudflare.acme.email=admin@hermnet.org
-      - --certificatesresolvers.cloudflare.acme.storage=/srv/homelab/traefik/acme/acme.json
+      - --certificatesresolvers.cloudflare.acme.storage=/etc/traefik/acme/acme.json
       - --log.level=INFO
     environment:
       - CF_DNS_API_TOKEN_FILE=/run/secrets/cf_dns_api_token
