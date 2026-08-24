@@ -38,3 +38,11 @@ services:
     cpus: 0.50          # ~ limits.cpu: 500m
     mem_limit: 256m     # ~ limits.memory: 256Mi
     mem_reservation: 64m # ~ requests.memory: 64Mi
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_proxy"
+      - "traefik.http.routers.adguard.rule=Host(`adguard.infra.hermnet.org`)"
+      - "traefik.http.routers.adguard.entrypoints=websecure"
+      - "traefik.http.routers.adguard.tls.certresolver=cloudflare"
+      - "traefik.http.services.adguard.loadbalancer.server.port=80"
