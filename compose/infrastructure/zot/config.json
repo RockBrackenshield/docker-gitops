@@ -26,5 +26,20 @@
       }
     }
 
+  },
+  "auth": {
+  "htpasswd": { "path": "/var/lib/registry/htpasswd" },
+
+  "accessControl": {
+  "repositories": {
+    "**": {
+      "anonymousPolicy": ["read"],
+      "policies": [
+        { "users": ["komodo"], "actions": ["read", "create", "update"] }
+      ],
+      "defaultPolicy": []
+    }
   }
+}
+}
 }

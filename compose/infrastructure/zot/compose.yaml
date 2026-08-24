@@ -9,4 +9,4 @@ services:
       - "5000:5000"
     volumes:
       - /srv/homelab/zot/data:/var/lib/registry
-      - ./config.json:/etc/zot/config.json:ro
+      - /srv/homelab/zot/config.json:/etc/zot/config.json:ro
