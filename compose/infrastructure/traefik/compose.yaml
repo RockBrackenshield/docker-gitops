@@ -1,7 +1,7 @@
 services:
   traefik:
     image: traefik:v3.7.11
-    container_name: traefik
+    container_name: traefik_infra
     restart: unless-stopped
     command:
       - --api.dashboard=true
