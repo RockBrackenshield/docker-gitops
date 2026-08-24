@@ -41,7 +41,7 @@ services:
       FERRETDB_POSTGRESQL_URL: postgres://${KOMODO_DB_USERNAME}:${KOMODO_DB_PASSWORD}@postgres:5432/postgres
 ###########################################################################  
   core:
-    image: ghcr.io/moghtech/komodo-core:latest
+    image: ghcr.io/moghtech/komodo-core:2.3.1
     labels:
       komodo.skip: # Prevent Komodo from stopping with StopAllContainers
     restart: always
@@ -70,11 +70,14 @@ services:
   ## or deploy the Periphery binary with systemd using 
   ## https://github.com/moghtech/komodo/tree/main/scripts
   periphery:
-    image: ghcr.io/moghtech/komodo-periphery:latest
+    image: ghcr.io/moghtech/komodo-periphery:2.3.1
     labels:
       komodo.skip: # Prevent Komodo from stopping with StopAllContainers
     restart: always
     env_file: ./.env
+    environment:
+      PERIPHERY_STACK_DIR=/srv/homelab/komodo/periphery
+      PERIPHERY_ROOT_DIRECTORY=/srv/homelab/komodo/periphery
     volumes:
       ## Mount external docker socket
       - /var/run/docker.sock:/var/run/docker.sock
@@ -84,7 +87,7 @@ services:
       ## Must be the same inside and outside the container,
       ## or docker will get confused. See https://github.com/moghtech/komodo/discussions/180.
       ## Default: /etc/komodo.
-      - /etc/komodo:/etc/komodo
+      - /srv/homelab/komodo/periphery:/srv/homelab/komodo/periphery
 
 volumes:
 #  # Postgres

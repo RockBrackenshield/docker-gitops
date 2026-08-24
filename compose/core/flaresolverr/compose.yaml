@@ -1,0 +1,25 @@
+services:
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=America/Detroit
+    ports:
+      - "8191:8191"
+
+    # Set DNS server to prevent EU blocking
+    #dns:
+    #  - 1.1.1.1
+    #  - 1.0.0.1
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8191/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
