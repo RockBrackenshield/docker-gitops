@@ -8,9 +8,9 @@ services:
       - server
       - start
       - --address=0.0.0.0:51515
-      - --tls-cert-file=/srv/homelab/kopia/certs/kopia-server.crt
-      - --tls-key-file=/srv/homelab/kopia/certs/kopia-server.key
-      - --config-file=/srv/homelab/kopia/config/repository.config
+      - --tls-cert-file=app/certs/kopia-server.crt
+      - --tls-key-file=app/certs/kopia-server.key
+      - --config-file=app/config/repository.config
       - --cache-directory=/app/cache
       - --no-check-for-updates
 
