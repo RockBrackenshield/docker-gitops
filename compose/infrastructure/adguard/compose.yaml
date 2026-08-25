@@ -20,7 +20,7 @@ services:
     ports:
       - "53:53/tcp"
       - "53:53/udp"
-      - "8080:80/tcp"
+      # - "80:80/tcp"
       # First-run setup wizard below.
       # - "3000:3000/tcp"
 
@@ -45,4 +45,4 @@ services:
       - "traefik.http.routers.adguard.rule=Host(`adguard.infra.hermnet.org`)"
       - "traefik.http.routers.adguard.entrypoints=websecure"
       - "traefik.http.routers.adguard.tls.certresolver=cloudflare"
-      - "traefik.http.services.adguard.loadbalancer.server.port=8080"
+      - "traefik.http.services.adguard.loadbalancer.server.port=80"
