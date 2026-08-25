@@ -23,20 +23,6 @@ services:
       - /srv/homelab/kopia_server/logs:/app/logs
       - /srv/homelab/kopia_server/certs:/app/certs:ro
 
-    networks:
-      - traefik
-
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.kopia.rule=Host(`kopia.hermnet.org`)
-      - traefik.http.routers.kopia.entrypoints=websecure
-      - traefik.http.routers.kopia.tls=true
-      - traefik.http.services.kopia.loadbalancer.server.port=51515
-      - traefik.http.services.kopia.loadbalancer.server.scheme=https
-      - traefik.http.serversTransports.kopia-transport.insecureSkipVerify=true
-      - traefik.http.services.kopia.loadbalancer.serverstransport=kopia-transport
-      - traefik.http.routers.kopia.service=kopia
-
     healthcheck:
       test:
         - CMD

@@ -10,11 +10,3 @@ services:
     volumes:
       - /srv/homelab/zot/data:/var/lib/registry
       - /srv/homelab/zot/config.json:/etc/zot/config.json:ro
-
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik_proxy"
-      - "traefik.http.routers.zot.rule=Host(`zot.infra.hermnet.org`)"
-      - "traefik.http.routers.zot.entrypoints=websecure"
-      - "traefik.http.routers.zot.tls.certresolver=cloudflare"
-      - "traefik.http.services.zot.loadbalancer.server.port=5000"
