@@ -22,7 +22,7 @@ services:
       - "53:53/udp"
       - "80:80/tcp"
       # First-run setup wizard below.
-      - "3000:3000/tcp"
+      # - "3000:3000/tcp"
 
     volumes:
       - /srv/homelab/adguard/adguard-conf:/opt/adguardhome/conf
