@@ -1,0 +1,25 @@
+services:
+  zoraxy:
+    image: zoraxydocker/zoraxy:latest
+    container_name: zoraxy
+    restart: unless-stopped
+    networks:
+      - traefik_proxy   # keep the existing external bridge; rename later to `edge` once HAProxy/Traefik are fully decommissioned
+    ports:
+      - "80:80"         # HTTP -> auto-redirect to HTTPS (configured in-UI)
+      - "443:443"       # HTTPS entrypoint; replaces HAProxy's 443 SNI frontend
+      - "8000:8000"     # Zoraxy management UI -- see note below on exposing this safely
+    volumes:
+      - /srv/homelab/zoraxy/config:/opt/zoraxy/config/
+      - /srv/homelab/zoraxy/plugin:/opt/zoraxy/plugin/
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - FASTGEOIP=true
+      - TZ=America/Detroit   # adjust to your actual TZ
+      # PORT=8000 is the default management port; no need to set unless changing it
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  traefik_proxy:
+    external: true
