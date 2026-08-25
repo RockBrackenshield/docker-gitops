@@ -18,10 +18,10 @@ services:
       TZ: ${TZ:-America/Detroit}
 
     volumes:
-      - /srv/homelab/kopia_server/config:/app/config
-      - /srv/homelab/kopia_server/cache:/app/cache
-      - /srv/homelab/kopia_server/logs:/app/logs
-      - /srv/homelab/kopia_server/certs:/app/certs:ro
+      - /srv/homelab/kopia/config:/app/config
+      - /srv/homelab/kopia/cache:/app/cache
+      - /srv/homelab/kopia/logs:/app/logs
+      - /srv/homelab/kopia/certs:/app/certs:ro
 
     healthcheck:
       test:
