@@ -37,3 +37,4 @@ services:
 networks:
   infra_internal:
     external: true
+    name: infra_internal

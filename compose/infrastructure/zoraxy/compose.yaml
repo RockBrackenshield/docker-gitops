@@ -23,5 +23,7 @@ services:
 networks:
   infra_edge:
     external: true
+    name: infra_edge
   infra_internal:
     external: true
+    name: infra_internal
