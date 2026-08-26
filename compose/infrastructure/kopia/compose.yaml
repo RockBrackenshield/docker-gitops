@@ -3,7 +3,8 @@ services:
     image: kopia/kopia:20260623.0.3052
     container_name: kopia-server
     restart: unless-stopped
-
+    networks:
+      - infra_internal
     command:
       - server
       - start

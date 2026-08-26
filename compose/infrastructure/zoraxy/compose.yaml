@@ -4,7 +4,8 @@ services:
     container_name: zoraxy
     restart: unless-stopped
     networks:
-      - traefik_proxy   # keep the existing external bridge; rename later to `edge` once HAProxy/Traefik are fully decommissioned
+      - infra_edge   # keep the existing external bridge; rename later to `edge` once HAProxy/Traefik are fully decommissioned
+      - infra_internal
     ports:
       - "80:80"         # HTTP -> auto-redirect to HTTPS (configured in-UI)
       - "443:443"       # HTTPS entrypoint; replaces HAProxy's 443 SNI frontend
