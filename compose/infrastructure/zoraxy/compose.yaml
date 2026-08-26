@@ -21,7 +21,7 @@ services:
       - "host.docker.internal:host-gateway"
 
 networks:
-  edge:
+  infra_edge:
     external: true
-  internal:
+  infra_internal:
     external: true

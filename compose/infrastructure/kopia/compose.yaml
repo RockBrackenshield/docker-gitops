@@ -35,5 +35,5 @@ services:
       start_period: 30s
 
 networks:
-  internal:
+  infra_internal:
     external: true
