@@ -14,6 +14,8 @@ services:
       - --config-file=/app/config/repository.config
       - --cache-directory=/app/cache
       - --no-check-for-updates
+      - --server-username=${KOPIA_SERVER_USERNAME}
+      - --server-password=${KOPIA_SERVER_PASSWORD}
 
     environment:
       TZ: ${TZ:-America/Detroit}
