@@ -1,0 +1,53 @@
+services:
+  romm:
+    image: rommapp/romm:latest
+    container_name: romm
+    restart: unless-stopped
+    networks:
+      - infra_internal
+    environment:
+      - DB_HOST=romm-db
+      - DB_NAME=romm # Should match MARIADB_DATABASE in mariadb
+      - DB_USER=romm-user # Should match MARIADB_USER in mariadb
+      - DB_PASSWD= # Should match MARIADB_PASSWORD in mariadb
+      - ROMM_AUTH_SECRET_KEY= ${ROMM__AUTH_SECRET_KEY} # Generate a key with `openssl rand -hex 32`
+      - SCREENSCRAPER_USER= ${SCREENSCRAPER_USER} # These are the recommended metadata providers
+      - SCREENSCRAPER_PASSWORD= ${SCREENSCRAPER_PASSWORD} # https://docs.romm.app/latest/getting-started/metadata-providers/#screenscraper
+      - RETROACHIEVEMENTS_API_KEY= ${RETROACHIEVEMENTS_API_KEY} # https://docs.romm.app/latest/getting-started/metadata-providers/#retroachievements
+      - STEAMGRIDDB_API_KEY= ${STEAMGRIDDB_API_KEY} # https://docs.romm.app/latest/getting-started/metadata-providers/#steamgriddb
+      - HASHEOUS_API_ENABLED=true # https://docs.romm.app/latest/getting-started/metadata-providers/#hasheous
+    volumes:
+      - /srv/homelab/romm/resources:/romm/resources
+      - /srv/homelab/romm/redis-data:/redis-data
+      - /srv/homelab/romm/library:/romm/library
+      - /srv/homelab/romm/assets:/romm/assets
+      - /srv/homelab/romm/config:/romm/config
+    depends_on:
+      romm-db:
+        condition: service_healthy
+        restart: true
+
+  romm-db:
+    image: mariadb:latest
+    container_name: romm-db
+    restart: unless-stopped
+    networks:
+      - infra_internal
+    environment:
+      - MARIADB_ROOT_PASSWORD=${ROMM_DB_ROOT_PASSWORD}
+      - MARIADB_DATABASE=romm
+      - MARIADB_USER=romm-user
+      - MARIADB_PASSWORD=${ROMM_DB_PASSWORD}
+    volumes:
+      - /compose/infrastructure/romm/db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 30s
+      start_interval: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  infra_internal:
+    external: true
