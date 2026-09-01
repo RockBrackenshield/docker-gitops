@@ -8,4 +8,4 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /srv/homelab/dockhand/data:/app/data
-      - /usr/local/bin/pass-cli:/usr/local/bin/pass-cli:ro
+      - /usr/local/bin/bws:/usr/local/bin/bws:ro
