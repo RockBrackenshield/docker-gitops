@@ -16,6 +16,7 @@ services:
       - --no-check-for-updates
       - --server-username=${KOPIA_SERVER_USERNAME}
       - --server-password=${KOPIA_SERVER_PASSWORD}
+      - --password=${KOPIA_REPO_PASSWORD}
 
     environment:
       TZ: ${TZ:-America/Detroit}
