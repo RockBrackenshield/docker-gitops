@@ -10,7 +10,7 @@ services:
       - DB_NAME=romm # Should match MARIADB_DATABASE in mariadb
       - DB_USER=romm-user # Should match MARIADB_USER in mariadb
       - DB_PASSWD= # Should match MARIADB_PASSWORD in mariadb
-      - ROMM_AUTH_SECRET_KEY= ${ROMM__AUTH_SECRET_KEY} # Generate a key with `openssl rand -hex 32`
+      - ROMM_AUTH_SECRET_KEY= ${ROMM_AUTH_SECRET_KEY} # Generate a key with `openssl rand -hex 32`
       - SCREENSCRAPER_USER= ${SCREENSCRAPER_USER} # These are the recommended metadata providers
       - SCREENSCRAPER_PASSWORD= ${SCREENSCRAPER_PASSWORD} # https://docs.romm.app/latest/getting-started/metadata-providers/#screenscraper
       - RETROACHIEVEMENTS_API_KEY= ${RETROACHIEVEMENTS_API_KEY} # https://docs.romm.app/latest/getting-started/metadata-providers/#retroachievements
