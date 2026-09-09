@@ -28,7 +28,7 @@ services:
         restart: true
 
   romm-db:
-    image: mariadb:13.0.1-ubi-rc@sha256:edd9e48a4aa7ed576415c55504170e18e2f6d4d5474aeb248c4d680cda7aa5cf
+    image: mariadb:12.3.3-ubi@sha256:44bfb5746ef96a0c80441ce2df37bc3fb7d8ade3a83bfaaba90645a6a4345fc5
     container_name: romm-db
     restart: unless-stopped
     environment:
