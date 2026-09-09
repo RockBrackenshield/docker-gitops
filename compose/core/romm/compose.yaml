@@ -1,15 +1,15 @@
 services:
   romm:
-    image: rommapp/romm:latest
+    image: rommapp/romm:5.2.0@sha256:3512f2ca455782f90247271bed23116e6bc675bc74e379be2c41696e607ab11e
     container_name: romm
     restart: unless-stopped
-    networks:
-      - infra_internal
+    ports:
+      - 8080:8080
     environment:
       - DB_HOST=romm-db
       - DB_NAME=romm # Should match MARIADB_DATABASE in mariadb
       - DB_USER=romm-user # Should match MARIADB_USER in mariadb
-      - DB_PASSWD= # Should match MARIADB_PASSWORD in mariadb
+      - DB_PASSWD=${ROMM_DB_PASSWORD} # Should match MARIADB_PASSWORD in mariadb
       - ROMM_AUTH_SECRET_KEY= ${ROMM_AUTH_SECRET_KEY} # Generate a key with `openssl rand -hex 32`
       - SCREENSCRAPER_USER= ${SCREENSCRAPER_USER} # These are the recommended metadata providers
       - SCREENSCRAPER_PASSWORD= ${SCREENSCRAPER_PASSWORD} # https://docs.romm.app/latest/getting-started/metadata-providers/#screenscraper
@@ -28,11 +28,9 @@ services:
         restart: true
 
   romm-db:
-    image: mariadb:latest
+    image: mariadb:13.0.1-ubi-rc@sha256:edd9e48a4aa7ed576415c55504170e18e2f6d4d5474aeb248c4d680cda7aa5cf
     container_name: romm-db
     restart: unless-stopped
-    networks:
-      - infra_internal
     environment:
       - MARIADB_ROOT_PASSWORD=${ROMM_DB_ROOT_PASSWORD}
       - MARIADB_DATABASE=romm

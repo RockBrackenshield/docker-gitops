@@ -1,6 +1,6 @@
 services:
   shelfmark-lite:
-    image: ghcr.io/calibrain/shelfmark-lite:latest
+    image: ghcr.io/calibrain/shelfmark-lite:sha256-d3b543487b79031aec7b6b9fae06c6e7c296965e10d46d5f711b0a3c52c1335c
     container_name: shelfmark-lite
     environment:
       EXT_BYPASSER_URL: ${FLARESOLVERR_URL}

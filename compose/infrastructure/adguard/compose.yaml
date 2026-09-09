@@ -8,7 +8,7 @@
 
 services:
   adguard-home:
-    image: adguard/adguardhome:v0.107.77  # latest stable release as of 2026-08-17 (release date 2026-06-02) — check https://github.com/AdguardTeam/AdGuardHome/releases before bumping
+    image: adguard/adguardhome:v0.107.79@sha256:aba9e3bf0613be3ba3755e1fc311b126e2c24bec25e18b6483894a88283074f0  # latest stable release as of 2026-08-17 (release date 2026-06-02) — check https://github.com/AdguardTeam/AdGuardHome/releases before bumping
     container_name: adguard-home
     hostname: adguard-home
     restart: unless-stopped

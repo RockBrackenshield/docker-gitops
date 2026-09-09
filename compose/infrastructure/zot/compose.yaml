@@ -1,6 +1,6 @@
 services:
   zot:
-    image: ghcr.io/project-zot/zot:latest
+    image: ghcr.io/project-zot/zot:v2.1.21
     container_name: zot
     restart: unless-stopped
     cpus: 1.5
