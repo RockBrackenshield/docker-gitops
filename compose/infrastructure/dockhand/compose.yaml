@@ -2,7 +2,7 @@ services:
   dockhand:
     image: fnsys/dockhand:latest
     container_name: dockhand
-    restart: unless-stopped
+    restart: always
     ports:
       - 3000:3000
     volumes:

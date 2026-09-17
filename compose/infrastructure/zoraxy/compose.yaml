@@ -2,7 +2,7 @@ services:
   zoraxy:
     image: zoraxydocker/zoraxy:v3.3.4@sha256:c64ed57e10631d8f7482ce1ed6b337e653052a05646bd5dd77b009dcf0ae786d
     container_name: zoraxy
-    restart: unless-stopped
+    restart: always
     networks:
       - infra_edge   # keep the existing external bridge; rename later to `edge` once HAProxy/Traefik are fully decommissioned
       - infra_internal
