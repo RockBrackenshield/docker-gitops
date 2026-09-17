@@ -1,0 +1,20 @@
+services:
+  backrest:
+    image: garethgeorge/backrest:latest
+    container_name: backrest
+    hostname: backrest
+    restart: unless-stopped
+    ports:
+      - "9898:9898"
+    environment:
+      - BACKREST_DATA=/data
+      - BACKREST_CONFIG=/config/config.json
+      - XDG_CACHE_HOME=/cache
+      - TMPDIR=/tmp
+      - TZ=America/Detroit
+    volumes:
+      - /srv/backrest/data:/data
+      - /srv/backrest/config:/config
+      - /srv/backrest/cache:/cache
+      - /srv/backrest/tmp:/tmp
+      - /srv/homelab:/srv/homelab:ro
