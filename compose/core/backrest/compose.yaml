@@ -18,4 +18,4 @@ services:
       - /srv/backrest/cache:/cache
       - /srv/backrest/tmp:/tmp
       - /srv/homelab:/srv/homelab:ro
-      - /srv/romm:/srv/romm:ro
+      - /srv/romm/dump:/srv/romm/dump:ro

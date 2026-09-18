@@ -37,7 +37,7 @@ services:
       - MARIADB_USER=romm-user
       - MARIADB_PASSWORD=${ROMM_DB_PASSWORD}
     volumes:
-      - /srv/homelab/romm/db:/var/lib/mysql
+      - /srv/romm/db:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       start_period: 30s
@@ -45,3 +45,43 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+#  romm-db-backup:
+#    # Same pinned image/tag as romm-db so mariadb-dump matches the server version exactly.
+#    image: mariadb:12.3.3-noble@sha256:a74d5702a14e2912d5edf939c0e450068a9fecb294b624e113dcf1bb50bc3307
+#    container_name: romm-db-backup
+#    restart: unless-stopped
+#    environment:
+#      - DB_HOST=romm-db
+#      - DB_NAME=romm
+#      - DB_USER=romm-user
+#      - MYSQL_PWD=${ROMM_DB_PASSWORD} # never pass the password as a CLI arg (process list leakage)
+#      - BACKUP_INTERVAL_SECONDS=86400 # one dump per day; Backrest/Restic snapshots the volume on its own schedule
+#      - RETAIN_COUNT=3 # keep only a handful locally; Backrest/Restic handles real versioning/retention
+#    volumes:
+#      - /srv/romm/dump:/dump
+#    depends_on:
+#      romm-db:
+#        condition: service_healthy
+#    entrypoint:
+#      - sh
+#      - -c
+#      - |
+#        set -e
+#        while true; do
+#          TS=$$(date +%Y%m%d-%H%M%S)
+#          OUT="/dump/romm-$${TS}.sql"
+#          mariadb-dump \
+#            --host="$$DB_HOST" \
+#            --user="$$DB_USER" \
+#            --single-transaction \
+#            --quick \
+#            --routines \
+#            --triggers \
+#            --events \
+#            "$$DB_NAME" > "$${OUT}.tmp"
+#          mv "$${OUT}.tmp" "$$OUT"
+#          # prune to RETAIN_COUNT newest dumps, oldest first
+#          ls -1t /dump/romm-*.sql 2>/dev/null | tail -n "+$$((RETAIN_COUNT + 1))" | xargs -r rm --
+#          sleep "$$BACKUP_INTERVAL_SECONDS"
+#        done
