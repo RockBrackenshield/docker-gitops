@@ -1,10 +1,10 @@
 services:
-  #shelfmark-lite:
-  shelfmark:
-    image: ghcr.io/calibrain/shelfmark:latest
-    #image: ghcr.io/calibrain/shelfmark-lite:latest
-    #container_name: shelfmark-lite
-    container_name: shelfmark
+  shelfmark-lite:
+  #shelfmark:
+    #image: ghcr.io/calibrain/shelfmark:latest
+    image: ghcr.io/calibrain/shelfmark-lite:latest
+    container_name: shelfmark-lite
+    #container_name: shelfmark
     environment:
     #  EXT_BYPASSER_URL: ${FLARESOLVERR_URL}
       PUID: 1000
