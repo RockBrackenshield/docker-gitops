@@ -1,7 +1,7 @@
 services:
   #shelfmark-lite:
   shelfmark:
-    image: ghcr.io/clibrain/shelfmark:latest
+    image: ghcr.io/calibrain/shelfmark:latest
     #image: ghcr.io/calibrain/shelfmark-lite:latest
     #container_name: shelfmark-lite
     container_name: shelfmark
