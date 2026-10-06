@@ -6,7 +6,7 @@ services:
     container_name: shelfmark-lite
     #container_name: shelfmark
     environment:
-    #  EXT_BYPASSER_URL: ${FLARESOLVERR_URL}
+      EXT_BYPASSER_URL: ${FLARESOLVERR_URL}
       PUID: 1000
       PGID: 1000
     ports:
