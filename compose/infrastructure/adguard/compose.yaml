@@ -12,7 +12,6 @@ services:
     container_name: adguard-home
     hostname: adguard-home
     restart: always
-    pull_policy: always                   # ~ imagePullPolicy: Always
 
     environment:
       TZ: America/Detroit
