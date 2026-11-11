@@ -1,0 +1,54 @@
+# Validates every Compose file with `docker compose config` on GitHub-hosted
+# runners (Docker Engine and the Compose v2 plugin are preinstalled).
+# Unset ${VAR}s only produce warnings: secrets are injected by Dockhand at
+# deploy time and are never available here.
+name: compose-validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compose-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-config:
+    name: docker compose config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Tool versions
+        run: |
+          docker version --format 'Docker Engine {{.Server.Version}}'
+          docker compose version
+
+      - name: Validate compose/**/compose.yaml
+        shell: bash
+        run: |
+          set -uo pipefail
+          shopt -s globstar nullglob
+          files=(compose/**/compose.yaml)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no compose/**/compose.yaml files found"
+            exit 1
+          fi
+          fail=0
+          for f in "${files[@]}"; do
+            if docker compose -f "$f" config --quiet; then
+              echo "OK   $f"
+            else
+              echo "::error file=$f::docker compose config failed"
+              fail=1
+            fi
+          done
+          exit "$fail"

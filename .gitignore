@@ -27,35 +27,13 @@ Desktop.ini
 *.swn
 
 # ============================================================
-# Ansible
-# ============================================================
-
-# Ansible retry files
-*.retry
-
-# Ansible local execution artifacts
-.ansible/
-ansible/.ansible/
-
-# Ansible Vault password files
-.vault_pass
-.vault_password
-.vault-password
-*.vault_pass
-
-# Temporary Ansible files
-ansible-tmp/
-ansible-cache/
-
-# ============================================================
 # Secrets / credentials
 # ============================================================
 
 # IMPORTANT:
-# SOPS-encrypted files (*.sops.yaml, *.sops.json, etc.) SHOULD
-# be committed to Git.
-#
-# Ignore only plaintext/local secret material.
+# Secrets are injected at deploy time by Dockhand (Bitwarden Secrets
+# Manager) and referenced in compose files as ${VAR}. Never commit
+# real secret values or local env files.
 
 *.secret
 *.secret.yaml
@@ -94,7 +72,8 @@ id_ecdsa.*
 # Docker / Compose
 # ============================================================
 
-# Local Compose environment overrides
+# Local Compose environment overrides and env files
+docker-compose.env
 docker-compose.override.yml
 compose.override.yaml
 compose.local.yaml
@@ -138,11 +117,6 @@ backups/
 backup/
 *.backup
 *.bak
-
-# Kopia local cache/config generated outside the intended
-# infrastructure configuration
-.kopia/
-kopia-cache/
 
 # ============================================================
 # Certificates / TLS material
