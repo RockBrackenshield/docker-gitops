@@ -36,7 +36,7 @@ Two Raspberry Pi 4Bs, each running Docker:
 
 | Node | Stacks |
 |---|---|
-| `infrastructure` | AdGuard Home (DNS), Zoraxy (reverse proxy), Tailscale (remote access), Dockhand (deployments), Backrest (backups) |
+| `infrastructure` | AdGuard Home (DNS), Zoraxy (reverse proxy), Tailscale (remote access), Dockhand (deployments), Backrest (backups), ntfy (notifications) |
 | `core` | RomM, Shelfmark, FlareSolverr, Paperless-ngx (documents, with SMB and NFS ingest), Backrest (backups) |
 
 ---
