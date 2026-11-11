@@ -1,0 +1,15 @@
+# Installed by host/bootstrap.sh to /etc/systemd/system/.
+# Adds the DOCKER-USER second layer once Docker has created its chains, and
+# re-runs whenever Docker restarts (PartOf=).
+[Unit]
+Description=homelab firewall, DOCKER-USER layer (after Docker)
+After=docker.service homelab-firewall-early.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/homelab-firewall.sh --docker
+
+[Install]
+WantedBy=docker.service
