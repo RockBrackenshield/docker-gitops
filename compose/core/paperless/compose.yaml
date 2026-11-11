@@ -1,0 +1,143 @@
+# Paperless-ngx on the core node.
+#
+# Secrets and site-specific values come from Dockhand (Bitwarden Secrets
+# Manager) as ${VAR}. See "Paperless-ngx host setup (core)" in
+# infrastructure/README.md for the pre-deploy variable checklist, host
+# directories, firewall allowlist and NFS export.
+#
+# Ingest: files land in /srv/homelab/paperless/consume/<source>/ on core's
+# local disk (smb/ from the printer via the samba service, nfs/ from the laptop
+# via the host's NFS server). Each subfolder name becomes a tag.
+
+services:
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.4.2@sha256:d704e84f88300eb6ab001ab15720a2330ff99169cf9f94d6b8fcc44b63a84c84
+    container_name: paperless
+    restart: unless-stopped
+    ports:
+      # Bound to core's LAN address only; reached through Zoraxy. The host
+      # firewall (DOCKER-USER) allows 8000 from the Zoraxy node only.
+      - target: 8000
+        published: "8000"
+        host_ip: ${CORE_LAN_IP}
+        protocol: tcp
+    networks:
+      - frontend
+      - backend
+    environment:
+      - PAPERLESS_DBENGINE=postgresql
+      - PAPERLESS_DBHOST=db
+      - PAPERLESS_DBNAME=paperless
+      - PAPERLESS_DBUSER=paperless
+      - PAPERLESS_DBPASS=${PAPERLESS_DB_PASSWORD} # same value as POSTGRES_PASSWORD in db
+      - PAPERLESS_REDIS=redis://broker:6379
+      - PAPERLESS_SECRET_KEY=${PAPERLESS_SECRET_KEY}
+      - PAPERLESS_URL=${PAPERLESS_URL} # https URL served by Zoraxy; also sets CSRF trusted origins and allowed hosts
+      - 'PAPERLESS_PROXY_SSL_HEADER=["HTTP_X_FORWARDED_PROTO", "https"]' # Zoraxy terminates TLS; safe only while 8000 is firewalled to Zoraxy
+      - PAPERLESS_TRUSTED_PROXIES=${PAPERLESS_TRUSTED_PROXIES} # Zoraxy node address; leave empty until the firewall allowlist is in place
+      - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER} # first start only; clear afterwards
+      - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD} # first start only; clear afterwards
+      - USERMAP_UID=${PAPERLESS_UID} # owner of /srv/homelab/paperless; same UID samba and NFS write as
+      - USERMAP_GID=${PAPERLESS_GID}
+      - PAPERLESS_TIME_ZONE=America/Detroit
+      - PAPERLESS_OCR_LANGUAGE=eng
+      # 0 = native inotify. The consume dir is local disk on core: samba (a
+      # container on this host) and the kernel NFS server both write through
+      # the host kernel, so inotify sees new files. Polling is only needed when
+      # the consume dir is itself a network mount.
+      - PAPERLESS_CONSUMER_POLLING_INTERVAL=0
+      - PAPERLESS_CONSUMER_RECURSIVE=true # watch consume/smb and consume/nfs
+      - PAPERLESS_CONSUMER_SUBDIRS_AS_TAGS=true # tag documents "smb" or "nfs" by source
+    volumes:
+      - /srv/homelab/paperless/data:/usr/src/paperless/data
+      - /srv/homelab/paperless/media:/usr/src/paperless/media
+      - /srv/homelab/paperless/export:/usr/src/paperless/export
+      - /srv/homelab/paperless/consume:/usr/src/paperless/consume
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      broker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-S", "-L", "--max-time", "2", "http://localhost:8000"]
+      start_period: 90s # first start runs migrations; slow on a Pi 4
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  db:
+    image: docker.io/library/postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
+    container_name: paperless-db
+    restart: unless-stopped
+    networks:
+      - backend
+    environment:
+      - POSTGRES_DB=paperless
+      - POSTGRES_USER=paperless
+      - POSTGRES_PASSWORD=${PAPERLESS_DB_PASSWORD} # only applied when the cluster is first initialised
+    volumes:
+      # Outside /srv/homelab on purpose: live DB files aren't backed up by
+      # Backrest; paperless-db-backup's dumps are.
+      - /srv/paperless/db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperless -d paperless"]
+      start_period: 30s
+      start_interval: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db-backup:
+    # Same pinned image/tag as db so pg_dump matches the server version exactly.
+    image: docker.io/library/postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
+    container_name: paperless-db-backup
+    restart: unless-stopped
+    networks:
+      - backend
+    environment:
+      - PGHOST=db
+      - PGDATABASE=paperless
+      - PGUSER=paperless
+      - PGPASSWORD=${PAPERLESS_DB_PASSWORD} # never pass the password as a CLI arg (process list leakage)
+      - BACKUP_INTERVAL_SECONDS=86400 # one dump per day; Backrest/Restic snapshots the folder on its own schedule
+      - RETAIN_COUNT=3 # keep only a handful locally; Backrest/Restic handles real versioning/retention
+    volumes:
+      - /srv/homelab/paperless/dump:/dump
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        while true; do
+          TS=$$(date +%Y%m%d-%H%M%S)
+          OUT="/dump/paperless-$${TS}.dump"
+          # custom format (-Fc): compressed; restore with pg_restore
+          pg_dump --format=custom --file="$${OUT}.tmp"
+          mv "$${OUT}.tmp" "$$OUT"
+          # prune to RETAIN_COUNT newest dumps, oldest first
+          ls -1t /dump/paperless-*.dump 2>/dev/null | tail -n "+$$((RETAIN_COUNT + 1))" | xargs -r rm --
+          sleep "$$BACKUP_INTERVAL_SECONDS"
+        done
+
+  broker:
+    image: docker.io/valkey/valkey:9.1.3-alpine3.24@sha256:bf09d58e96d6b4524a15396b65b242bbe18beebbcc15a04d8ee75ddac62fae0b
+    container_name: paperless-broker
+    restart: unless-stopped
+    networks:
+      - backend
+    volumes:
+      - /srv/paperless/broker:/data # task queue only; not backed up
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  frontend: {} # webserver's published port and egress
+  backend:
+    internal: true # db, broker, db-backup and webserver only; no egress, no published ports
