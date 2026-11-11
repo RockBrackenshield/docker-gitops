@@ -438,6 +438,164 @@ A Git repository can reconstruct the application configuration, while Backrest c
 
 ---
 
+# Paperless-ngx host setup (core)
+
+The Paperless stack (`compose/core/paperless`) needs a few things on the `core` host that Compose can't do itself. Everything here is a manual step on the host, the router or the Tailscale admin console. Values in `<angle brackets>` are placeholders; the real values never go in this repository.
+
+## 1. Variables (pre-deploy checklist)
+
+The stack's values live in a **dedicated Bitwarden Secrets Manager project for Paperless**, and the Dockhand machine-account token for this stack has access to that project only. Dockhand injects the whole project into the deploy environment, so nothing unrelated should sit in it.
+
+The compose file uses plain `${VAR}`: an unset variable becomes an empty string rather than stopping the deploy. Before every first deploy (and after editing the project), check:
+
+| Variable | Required | Notes |
+|---|---|---|
+| `PAPERLESS_SECRET_KEY` | yes | Generate with `python3 -c "import secrets; print(secrets.token_urlsafe(64))"`. Paperless won't start without it. |
+| `PAPERLESS_DB_PASSWORD` | yes | Used by the webserver, db and db-backup. Only applied when the database is first created; to change it later, run `ALTER USER paperless WITH PASSWORD '...'` in the db first. |
+| `PAPERLESS_URL` | **yes** | The `https://` URL Zoraxy serves, without a trailing slash. **Empty fails open**: allowed hosts become `*` and no CSRF origin is set. |
+| `CORE_LAN_IP` | **yes** | Core's LAN address. Ports 8000 and 445 bind to it. **Empty fails open**: the ports bind to every interface. |
+| `SMB_HOSTS_ALLOW` | **yes, in practice** | The printer's address(es). Optional for Compose, but **empty fails open**: Samba then allows every host. |
+| `SMB_PASSWORD` | yes | Password for the Samba user `scanner`. |
+| `PAPERLESS_UID`, `PAPERLESS_GID` | yes | Owner of `/srv/homelab/paperless`. Samba and NFS write as this UID. |
+| `PAPERLESS_ADMIN_USER`, `PAPERLESS_ADMIN_PASSWORD` | first start only | Create the first superuser, then clear both (see section 9). |
+| `PAPERLESS_TRUSTED_PROXIES` | after section 4 | The Zoraxy node's address. Leave empty until the firewall allowlist is in place. |
+
+After deploying, `docker inspect paperless paperless-samba` should show ports 8000 and 445 bound to `<core-lan-ip>`, not `0.0.0.0` or `::`.
+
+## 2. Old volumes
+
+Paperless starts fresh; there's no old data to migrate. Before the first deploy, run `docker volume ls --filter name=paperless` once. Leave anything it lists alone and don't prune it without reviewing it first.
+
+## 3. Directories and permissions
+
+```bash
+sudo mkdir -p /srv/homelab/paperless/{data,media,export,dump,consume/smb,consume/nfs} /srv/paperless/{db,broker}
+sudo chown -R <PAPERLESS_UID>:<PAPERLESS_GID> /srv/homelab/paperless
+sudo chmod 0750 /srv/homelab/paperless/{data,media,export,dump}
+sudo chmod 2770 /srv/homelab/paperless/consume /srv/homelab/paperless/consume/smb /srv/homelab/paperless/consume/nfs
+```
+
+- `consume/smb` is the printer's drop folder (Samba) and `consume/nfs` is the laptop's (NFS). Paperless watches `consume` recursively and tags each document with its subfolder name (`smb` or `nfs`). It doesn't delete the subfolders.
+- The setgid bit (`2770`) gives new files the Paperless group, whoever writes them.
+- `/srv/paperless/db` is chowned by the Postgres container on first start.
+- Check that nothing else on core listens on 445: `sudo ss -ltnp 'sport = :445'`.
+
+## 4. Host firewall allowlist
+
+Docker-published ports are DNATed before the host's INPUT rules, so ufw or firewalld zones don't restrict them. Filter them in the `DOCKER-USER` chain, matching the original destination port, for IPv4 and IPv6:
+
+```bash
+# 8000 (Paperless) only from the Zoraxy node; 445 (Samba) only from the printer
+sudo iptables  -I DOCKER-USER -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 8000 ! -s <zoraxy-node-ip> -j DROP
+sudo iptables  -I DOCKER-USER -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 445  ! -s <printer-ip>     -j DROP
+# IPv6: the same rules with the IPv6 addresses, or drop these ports entirely if IPv6 isn't used for them
+sudo ip6tables -I DOCKER-USER -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 8000 ! -s <zoraxy-node-ipv6> -j DROP
+sudo ip6tables -I DOCKER-USER -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 445  ! -s <printer-ipv6>     -j DROP
+```
+
+NFS (2049) is served by the host, not Docker, so it goes in the host's own input rules:
+
+```bash
+sudo iptables  -A INPUT -p tcp --dport 2049 ! -s <laptop-ip> -j DROP
+sudo ip6tables -A INPUT -p tcp --dport 2049 -j DROP   # unless the laptop uses IPv6 for NFS
+```
+
+- `--ctdir ORIGINAL` keeps the replies to allowed clients from being dropped.
+- Make the rules persistent on Raspberry Pi OS, for example with a small systemd unit ordered `After=docker.service` that re-inserts them at boot. Docker creates `DOCKER-USER` but leaves its contents alone.
+- On the router: UPnP **off**, and **no port forwards** for 445, 8000 or 2049.
+
+## 5. Tailnet access
+
+The Tailscale subnet router (on the infrastructure node) translates tailnet traffic so that it arrives on core *from the infrastructure node's address*, which is also Zoraxy's. The firewall in section 4 can't tell the two apart.
+
+In the Tailscale admin console, make sure the tailnet policy **doesn't grant** tailnet sources access to `<core-lan-ip>` on ports 445, 8000 or 2049. Tailscale policies are allow-lists, so if the policy has a broad rule (such as all sources to all destinations), replace it with explicit grants that leave these ports out. Reach Paperless from the tailnet through Zoraxy instead. Changing the subnet router itself is a separate change.
+
+## 6. NFS export for the laptop (NFSv4 only)
+
+On core (Raspberry Pi OS):
+
+```bash
+sudo apt install nfs-kernel-server
+```
+
+In `/etc/nfs.conf`, turn off NFSv3, which needs rpcbind and extra ports:
+
+```ini
+[nfsd]
+vers3=n
+```
+
+```bash
+sudo systemctl mask --now rpcbind.service rpcbind.socket rpc-statd.service
+```
+
+Add this to `/etc/exports`:
+
+```text
+/srv/homelab/paperless/consume/nfs <laptop-ip>(rw,sync,sec=sys,secure,no_subtree_check,root_squash,all_squash,anonuid=<PAPERLESS_UID>,anongid=<PAPERLESS_GID>)
+```
+
+```bash
+sudo exportfs -ra && sudo exportfs -v
+sudo systemctl restart nfs-server
+```
+
+Never export to the infrastructure node's address: tailnet traffic arrives from it.
+
+On the laptop (Fedora):
+
+```bash
+sudo dnf install nfs-utils
+sudo mkdir -p /mnt/paperless-consume
+```
+
+Add this to `/etc/fstab`:
+
+```text
+<core-host>:/srv/homelab/paperless/consume/nfs  /mnt/paperless-consume  nfs4  rw,noauto,x-systemd.automount,x-systemd.idle-timeout=600,_netdev  0 0
+```
+
+Things to know:
+
+- `sec=sys` trusts the client's address: anyone holding `<laptop-ip>` can write to the drop folder. `all_squash` maps every write to the Paperless UID/GID, so client user IDs don't matter.
+- With `no_subtree_check` on a subdirectory export, a client that guesses file handles could reach other files on the same filesystem. Putting `consume` on its own filesystem (a separate partition or subvolume) removes that.
+- For tighter isolation, the NFS and Samba writers could squash to a separate ingest UID that has write access only to `consume/*`, with `data`, `media`, `export` and `dump` set to `0700`. That's more moving parts; it isn't the default.
+
+## 7. Printer (scan to folder)
+
+- Share: `\\<core-host>\consume`. User: `scanner`, with the password from `SMB_PASSWORD`.
+- The printer must support **SMB 2.1 or newer with signing**. Samba refuses SMB1, guest access and unsigned connections.
+- If the printer can't connect for that reason, stop and decide what to do; don't weaken the Samba settings.
+- Samba applies its settings once, when the container is created. After changing `SMB_PASSWORD` or `SMB_HOSTS_ALLOW`, recreate the container (`docker compose up -d --force-recreate samba`).
+- The compose file drops all Linux capabilities for Samba and adds back a minimal set. If smbd fails to start, check its log and add back only the capability the error names.
+
+## 8. Backups and restore
+
+- Core's Backrest already backs up `/srv/homelab` read-only, which covers `paperless/{data,media,export,dump}`. Exclude `paperless/consume` in the Backrest plan (it's transient), and schedule the snapshot after the daily dump.
+- `/srv/paperless/db` (live database files) and `/srv/paperless/broker` (task queue) are deliberately not backed up. `paperless-db-backup` writes a daily custom-format dump to `paperless/dump` and keeps the newest three.
+
+Restore:
+
+```bash
+docker compose stop webserver db-backup
+# restore /srv/homelab/paperless from Backrest, then:
+docker compose up -d db
+docker compose exec -T db pg_restore --clean --if-exists --no-owner -U paperless -d paperless < /srv/homelab/paperless/dump/paperless-<timestamp>.dump
+docker compose up -d
+```
+
+## 9. After the first start
+
+- Clear `PAPERLESS_ADMIN_USER` and `PAPERLESS_ADMIN_PASSWORD` in the Bitwarden project and redeploy. They only create the first superuser.
+- Turn on TOTP two-factor authentication for the superuser.
+- Use a separate non-superuser account day to day.
+
+## 10. Zoraxy
+
+Zoraxy terminates TLS and proxies `https://<paperless-host>` to `http://<core-lan-ip>:8000`. It must set or overwrite `X-Forwarded-Proto`: Paperless trusts that header (`PAPERLESS_PROXY_SSL_HEADER`), which is only safe because section 4 lets nothing but Zoraxy reach port 8000. Traffic between Zoraxy and core is plain HTTP on the LAN.
+
+---
+
 # Infrastructure vs. Configuration
 
 Some files can initially appear ambiguous.
