@@ -44,7 +44,7 @@ jobs:
           fi
           fail=0
           for f in "${files[@]}"; do
-            if docker compose -f "$f" config --quiet; then
+            if docker compose --env-file .github/ci.env -f "$f" config --quiet; then
               echo "OK   $f"
             else
               echo "::error file=$f::docker compose config failed"
