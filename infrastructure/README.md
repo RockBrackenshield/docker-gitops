@@ -6,7 +6,12 @@ The guiding principle is:
 
 > **Docker Compose defines the Docker environment. Infrastructure defines the host and external environment that Docker depends upon.**
 
-This separation is intentional. The goal is to avoid recreating the abstraction and indirection of the Kubernetes environment this repository is replacing.
+This separation is intentional. The goal is to keep the Docker nodes simple and avoid the abstraction and indirection of a Kubernetes-style setup.
+
+The environment is two Raspberry Pi 4B nodes running Docker:
+
+* `infrastructure`: DNS, reverse proxy, remote access, deployment and backups (`compose/infrastructure/`)
+* `core`: applications (`compose/core/`)
 
 ---
 
@@ -14,12 +19,12 @@ This separation is intentional. The goal is to avoid recreating the abstraction 
 
 The `infrastructure/` directory answers questions such as:
 
-* What storage does the Docker host provide?
+* What storage does each Docker node provide?
 * Where is persistent application data stored?
 * How is the host network arranged?
 * What DNS, VLAN, routing, and firewall infrastructure does the environment depend upon?
 * How are backups performed?
-* How can the underlying host be rebuilt?
+* How can an underlying node be rebuilt?
 * What external infrastructure must exist before the Compose environment can operate?
 
 It **does not** define how individual containers are run.
@@ -30,7 +35,7 @@ That responsibility belongs to `/compose`.
 
 ## Directory Structure
 
-The intended structure is:
+The intended structure is below. Today only `README.md` exists; the rest is added when there is something real to document.
 
 ```text
 infrastructure/
@@ -52,7 +57,7 @@ infrastructure/
 │   └── layout.md
 │
 └── backup/
-    ├── kopia.md
+    ├── backrest.md
     ├── policies.md
     └── restore.md
 ```
@@ -66,26 +71,25 @@ Not every directory needs to contain files immediately. The structure should gro
 The repository has several distinct responsibilities:
 
 ```text
-homelab/
+docker-gitops/
 │
 ├── compose/
-│   └── How Docker runs applications
-│
-├── config/
-│   └── Non-secret application configuration
-│
-├── secrets/
-│   └── SOPS/age-encrypted secrets
+│   └── How Docker runs applications (compose/<node>/<stack>/compose.yaml)
 │
 ├── infrastructure/
 │   └── The environment underneath Docker
 │
-├── scripts/
-│   └── Operational actions
+├── .github/workflows/
+│   └── CI: compose-validate
 │
-└── docs/
-    └── General documentation and architectural information
+├── renovate.json
+│   └── Image and GitHub Actions updates
+│
+└── AGENTS.md
+    └── Rules for agents working in the repository
 ```
+
+Secrets are not stored in the repository. Dockhand injects them at deploy time from Bitwarden Secrets Manager, and compose files reference them as `${VAR}`.
 
 The dependency relationship is approximately:
 
@@ -97,7 +101,7 @@ The dependency relationship is approximately:
       Infrastructure              Compose
              │                       │
              ▼                       ▼
-        Docker Host             Containers
+        Docker Nodes            Containers
              │                  ┌────┴────┐
              │                  │         │
              ▼               Networks   Volumes
@@ -136,7 +140,7 @@ Examples include:
 * DNS infrastructure
 * External reverse-proxy dependencies
 * Backup repositories
-* Kopia configuration
+* Backrest repositories and plans
 * Host-level system services
 * OS configuration
 * Hardware-specific considerations
@@ -201,9 +205,8 @@ For example:
 ```text
 /srv/homelab/
 ├── adguard/
-├── authentik/
-├── paperless/
-├── postgres/
+├── backrest/
+├── romm/
 └── ...
 ```
 
@@ -213,16 +216,16 @@ Compose consumes it:
 
 ```yaml
 services:
-  paperless:
+  <app>:
     volumes:
-      - /srv/homelab/paperless/data:/usr/src/paperless/data
+      - /srv/homelab/<app>/data:/data
 ```
 
 The actual application data is **not** stored in Git.
 
 Git stores the definition of how that data is mounted; the host filesystem stores the data itself.
 
-This is an intentional replacement for the Kubernetes storage chain:
+Compared with a Kubernetes storage chain:
 
 ```text
 Kubernetes:
@@ -238,7 +241,7 @@ Volume
 Node disk
 ```
 
-with a simpler model:
+this is deliberately simpler:
 
 ```text
 Docker:
@@ -287,18 +290,17 @@ Infrastructure networking documentation might describe:
 
 ```text
 LAN
-  192.168.1.0/24
+  <LAN_CIDR>
 
-Docker host
-  192.168.1.x
+Docker nodes
+  <NODE_IP>
 
 Router
-  192.168.1.1
+  <ROUTER_IP>
 
 DNS
   AdGuard
-  NextDNS
-  Tailscale MagicDNS
+  Tailscale
 ```
 
 It may also document:
@@ -377,10 +379,8 @@ Examples:
 ### `host/packages/`
 
 * Required host packages
-* Docker installation requirements
-* SOPS
-* age
-* Kopia
+* Docker Engine and the Compose plugin
+* Bitwarden Secrets Manager CLI (used by Dockhand)
 * Supporting utilities
 
 ### `host/firewall/`
@@ -390,7 +390,7 @@ Examples:
 * Required outbound connectivity
 * Host-level security policy
 
-If host configuration eventually becomes automated with Ansible, this is also a natural location for that automation.
+If host configuration is ever automated, this is also a natural location for that automation.
 
 ---
 
@@ -402,7 +402,7 @@ For example:
 
 ```text
 infrastructure/backup/
-├── kopia.md
+├── backrest.md
 ├── policies.md
 └── restore.md
 ```
@@ -418,7 +418,7 @@ This should describe:
 * Restore procedures
 * Disaster recovery procedures
 
-Kopia itself may be installed and configured at the host level.
+Backrest runs as a Compose stack on each node (`compose/infrastructure/backrest`, `compose/core/backrest`) and reads the host data it protects read-only.
 
 The important architectural distinction is:
 
@@ -427,14 +427,14 @@ Git
  ↓
 Desired configuration
 
-Kopia
+Backrest
  ↓
 Persistent runtime data
 ```
 
 Neither replaces the other.
 
-A Git repository can reconstruct the application configuration, while Kopia can reconstruct the application's persistent state.
+A Git repository can reconstruct the application configuration, while Backrest can reconstruct the application's persistent state.
 
 ---
 
@@ -444,10 +444,10 @@ Some files can initially appear ambiguous.
 
 For example, consider DNS.
 
-An AdGuard configuration containing DNS rewrites is application configuration:
+An AdGuard configuration containing DNS rewrites is application configuration, kept with AdGuard's data on the host:
 
 ```text
-config/adguard/
+/srv/homelab/adguard/
 ```
 
 The overall network's DNS architecture is infrastructure:
@@ -460,15 +460,15 @@ Similarly:
 
 | Information               | Location                     |
 | ------------------------- | ---------------------------- |
-| AdGuard DNS rewrite       | `config/adguard/`            |
-| AdGuard container         | `compose/services/adguard/`  |
+| AdGuard DNS rewrite       | AdGuard's config on the host |
+| AdGuard container         | `compose/infrastructure/adguard/` |
 | Host IP address           | `infrastructure/networking/` |
 | Router DHCP configuration | `infrastructure/networking/` |
 | Docker network            | `compose/`                   |
 | Host filesystem           | `infrastructure/storage/`    |
 | Container bind mount      | `compose/`                   |
-| Kopia backup policy       | `infrastructure/backup/`     |
-| Application password      | `secrets/`                   |
+| Backrest backup plan      | `infrastructure/backup/`     |
+| Application password      | Dockhand (Bitwarden Secrets Manager) |
 
 When something is ambiguous, favor the question:
 
@@ -480,7 +480,7 @@ That system's configuration should generally be the authoritative representation
 
 # Avoiding Kubernetes-Like Complexity
 
-This repository intentionally avoids reproducing Kubernetes concepts simply because they existed in the previous environment.
+This repository intentionally avoids reproducing Kubernetes concepts simply because they exist in Kubernetes. The Talos lab in k3s-gitops is the place for those.
 
 We should resist introducing layers such as:
 
@@ -494,7 +494,7 @@ infrastructure/
 
 followed by tooling that generates Compose files from those definitions.
 
-That would provide little benefit for a single Docker host while introducing another abstraction that must be understood and maintained.
+That would provide little benefit for two small Docker nodes while introducing another abstraction that must be understood and maintained.
 
 Instead:
 
@@ -507,11 +507,11 @@ Compose
     ↓
 Docker environment
 
-Config
+Host data (bind mounts)
     ↓
-Application configuration
+Application configuration and state
 
-Secrets
+Dockhand (Bitwarden Secrets Manager)
     ↓
 Sensitive configuration
 ```
@@ -540,20 +540,20 @@ Documentation may describe it elsewhere, but it should not be necessary to maint
 
 Git contains configuration and desired state.
 
-Kopia protects persistent runtime data.
+Backrest protects persistent runtime data.
 
-## 5. Secrets belong in SOPS
+## 5. Secrets belong in Bitwarden Secrets Manager
 
-Sensitive values should be encrypted with SOPS/age and committed if they need to be version controlled.
+Sensitive values live in Bitwarden Secrets Manager and are injected by Dockhand at deploy time. Compose files reference them only as `${VAR}`.
 
-Plaintext secrets should not be committed.
+Secrets are never committed, encrypted or not.
 
 ## 6. Prefer explicitness over abstraction
 
 A simple Compose file referencing:
 
 ```text
-/srv/homelab/paperless
+/srv/homelab/<app>
 ```
 
 is preferable to a custom abstraction that dynamically generates that path.
@@ -571,15 +571,13 @@ Apply host infrastructure
     ↓
 Mount storage
     ↓
-Install Docker/SOPS/age/Kopia
+Install Docker
     ↓
-Clone repository
+Deploy Dockhand (connected to Bitwarden Secrets Manager)
     ↓
-Decrypt secrets
+Deploy the node's stacks from this repository
     ↓
-Deploy Compose
-    ↓
-Restore persistent data if necessary
+Restore persistent data with Backrest if necessary
 ```
 
 The repository does not need to implement all of this immediately. The directory structure simply provides a place for those pieces to evolve.
@@ -600,14 +598,14 @@ Is it a container/application?
              ▼
 Is it application configuration?
         │
-        ├── Yes → config/
+        ├── Yes → the stack's data on the host (bind mount, backed up by Backrest)
         │
         └── No
              │
              ▼
 Is it sensitive configuration?
         │
-        ├── Yes → secrets/
+        ├── Yes → Bitwarden Secrets Manager, injected by Dockhand
         │
         └── No
              │
@@ -616,7 +614,7 @@ Does it configure/support the host or external environment?
         │
         ├── Yes → infrastructure/
         │
-        └── No → docs/ or scripts/
+        └── No → README.md or AGENTS.md
 ```
 
 The overarching goal is **not** to make every aspect of the homelab fit into a rigid directory hierarchy.
@@ -624,10 +622,11 @@ The overarching goal is **not** to make every aspect of the homelab fit into a r
 The goal is to make it immediately apparent:
 
 1. **What runs?** → `compose/`
-2. **How is it configured?** → `config/`
-3. **What secrets does it require?** → `secrets/`
+2. **How is it configured?** → the stack's `compose.yaml` plus its data on the host
+3. **What secrets does it require?** → the `${VAR}`s in its `compose.yaml` (values in Bitwarden Secrets Manager)
 4. **What does the host/external environment provide?** → `infrastructure/`
-5. **How do I operate it?** → `scripts/`
-6. **How does it work?** → `docs/`
+5. **How does it work?** → `README.md` and `AGENTS.md`
+
+Planned, not yet present: a `config/` directory if non-secret application configuration ever needs version control.
 
 If a future change doesn't clearly fit one of those categories, that is a reason to reconsider the architecture before adding another abstraction.

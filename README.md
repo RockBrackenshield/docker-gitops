@@ -6,9 +6,7 @@ I started out on Docker, but then moved over to K3s once I found out that, with 
 
 I spent several weeks/months learning K3s, getting a number of utilities set up, but... it was a pain. I loved learning it, I was going into it with possibly using it to look for an SRE or platform engineer job, and orchestration is really useful, but man alive is it overkill for the little homelab I have now. If I had a full rack with server after server, sure, some flavour of Kubernetes would probably be useful, but a couple Pis, its just so much overhead and work to keep it going and I was frequently battling with ArgoCD which was.. whew, those were fights to try to get things resolved. 
 
-So, I'm planning on moving back to Docker. This repository will take what I've learned from both my previous Docker run and now the past Kuberneted run and try to make a nice, effective homelab. That doesn't need tinkering all the time and preferably does not require 20-30 minutes to boot up every time the power flickers (thank you power company).
-
-In terms of infrastructure, we'll be looking at Adguard for DNS, some form of reverse proxy (unsure if I'll run NPM like I did before, Traefik, Caddy, or something else entirely like Zoraxy), along with Authentik and Renovate for auth and update management and possibly Zot as a lightweight registry, all managed through Dockhand. In terms of apps, Metube, Home Assistant, and Jellyfin are on the docket, plus whatever else strikes my fancy.
+So, my day-to-day services run on Docker, while K3s carries on as a Talos lab on the Pi 5 (that lives in my k3s-gitops repo). This repository will take what I've learned from both my previous Docker run and now the past Kuberneted run and try to make a nice, effective homelab. That doesn't need tinkering all the time and preferably does not require 20-30 minutes to boot up every time the power flickers (thank you power company).
 
 Enjoy!
 
@@ -16,20 +14,39 @@ Enjoy!
 
 ## Purpose
 
-Largely as described as above. I want a homelab, K3s hurt my brain, Docker doesn't, let's run that.
+Largely as described as above. I want a homelab, K3s hurt my brain, Docker doesn't, let's run that. (The K3s/Talos lab sticks around for learning, in k3s-gitops.)
 
 ---
 
 ## Structure
 
-The repo is broken into several directories. 
+The repo is broken into a few pieces.
 
-`/compose` which is the workhorse. The stacks live here.
-`/config` will be for things like config directories various containers may need, like Adguard's config-dir. The idea is to keep things contained to allow for Kopia to easily back up the data. 
-`/secrets` will hold various encrypted config files, managed with SOPS + age. At least for now, we'll see how they fare, but they seem a viable option
-`/infrastructure` is going to be mostly notes. How things should be laid out, what's mounted where, various configs, addressing, etc. Things outlined and described here support Docker, but nothing about Docker runs out of here. This is all support for Docker to actually run the workloads once these items are put in place.
-`/scripts` are going to be things to help set up the environment, like Ansible scripts, or other operational items to setup, run, launch, or otherwise do things that the nodes may regularly require to keep Docker going.
-`/docs` is self explanatory. Infrastructure may actually be folded under here at some point
+`/compose` is the workhorse. The stacks live here, one per directory: `compose/<node>/<stack>/compose.yaml`.
+`/infrastructure` is mostly notes. How things should be laid out, what's mounted where, various configs, etc. Things outlined and described here support Docker, but nothing about Docker runs out of here.
+`/.github/workflows` holds CI: `compose-validate` runs `docker compose config` against every stack on each pull request.
+`renovate.json` configures Renovate, which keeps image versions and digests up to date through pull requests.
+`AGENTS.md` holds the rules for AI agents working in the repo.
+
+---
+
+## Nodes
+
+Two Raspberry Pi 4Bs, each running Docker:
+
+| Node | Stacks |
+|---|---|
+| `infrastructure` | AdGuard Home (DNS), Zoraxy (reverse proxy), Tailscale (remote access), Dockhand (deployments), Backrest (backups) |
+| `core` | RomM, Shelfmark, FlareSolverr, Backrest (backups) |
+
+---
+
+## How it runs
+
+- **Deployments and secrets:** Dockhand deploys the stacks. Secrets live in Bitwarden Secrets Manager and Dockhand injects them at deploy time; the compose files only reference them as `${VAR}`. Nothing secret is committed.
+- **Backups:** Backrest runs on both nodes and backs up the persistent data on the host. App data never goes in Git.
+- **Remote access:** Tailscale only.
+- **Updates:** Renovate (hosted app) opens pull requests for image updates; nothing automerges.
 
 ---
 
