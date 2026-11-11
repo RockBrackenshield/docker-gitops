@@ -733,7 +733,7 @@ No secret, token, hash, real URL or address goes into Git, commit messages or PR
 **Revoking.** A leaked token may already have minted more, so remove **every** token of that user:
 
 - Publisher: `docker exec ntfy ntfy user del <user>`, then re-run that user's `user add`, `access` and `token add` lines, and update the consumer (for Backrest, the secret file in section 7.1).
-- Lost device: remove all of `<admin-user>`'s tokens (`ntfy token remove <admin-user> <token>`, using the unmasked list only in a private terminal), run `docker exec -it ntfy ntfy user change-pass <admin-user>`, and **rotate every publisher token** too.
+- Lost device: delete and recreate the admin user, which removes **all** of its tokens (including any the lost token minted) without typing a token anywhere: `docker exec -it ntfy ntfy user del <admin-user>`, then `docker exec -it ntfy ntfy user add --role=admin <admin-user>` with a new password from Bitwarden. Re-issue a token for each remaining device (section 6), and **rotate every publisher token** too.
 - **Yearly:** rotate the publisher tokens, and re-issue device tokens before they expire.
 - **Watch for minted tokens:** compare the masked `token list` count per user with the table above. Any extra means a token was minted.
 
@@ -799,10 +799,23 @@ Rules for this script: never paste a token into it, never add `set -x`, `curl -v
 
 ### 7.3 Test (each node)
 
-1. **Token access**, from a tailnet device (prefix the commands with a space, or clear the shell history afterwards):
-   - `curl -u :<backrest-token> -d "test from <node>" https://<ntfy-host>/homelab-backrest` returns 200.
-   - `curl -u :<backrest-token> "https://<ntfy-host>/homelab-backrest/json?poll=1"` returns 403.
-   - An anonymous publish returns 403.
+1. **Token access**, on the node itself, reading the token from the root-only secret file (section 7.1). The token is piped to curl on stdin, the same way the hook does it, so it never appears on a command line, in `ps` or in shell history. Never echo it, and don't add `-v` or `--trace`.
+
+   ```bash
+   TOKEN_FILE=/srv/backrest/secrets/ntfy-token
+   # Publish with the Backrest token: expect 200
+   printf 'Authorization: Bearer %s\n' "$(sudo cat "$TOKEN_FILE")" \
+     | curl -sS -o /dev/null -w '%{http_code}\n' -H @- \
+         -d "test from <node>" "https://<ntfy-host>/homelab-backrest"
+   # Read with the Backrest token (write-only user): expect 403
+   printf 'Authorization: Bearer %s\n' "$(sudo cat "$TOKEN_FILE")" \
+     | curl -sS -o /dev/null -w '%{http_code}\n' -H @- \
+         "https://<ntfy-host>/homelab-backrest/json?poll=1"
+   # Anonymous publish: expect 403
+   curl -sS -o /dev/null -w '%{http_code}\n' -d "anon test" "https://<ntfy-host>/homelab-backrest"
+   ```
+
+   `printf` is a bash builtin, so the token is only ever in the shell's memory and curl's stdin.
 2. **Secret mounted** (prints metadata only):
    - `docker exec backrest sh -c 'test -s /run/secrets/ntfy_backrest_token && echo present || echo MISSING'`
    - `docker exec backrest printenv | grep -c NTFY_BACKREST_TOKEN` prints `0`.
