@@ -1,0 +1,20 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "docker-compose": {
+    "enabled": true
+  },
+  "pinDigests": true,
+  "separateMajorMinor": true,
+  "automerge": false,
+  "dependencyDashboard": true,
+  "fetchChangeLogs": "pr",
+  "labels": ["renovate"],
+  "packageRules": [
+    {
+      "description": "Major updates get their own PR (separateMajorMinor) and an extra label",
+      "matchUpdateTypes": ["major"],
+      "addLabels": ["major"]
+    }
+  ]
+}
