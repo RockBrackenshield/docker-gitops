@@ -446,14 +446,14 @@ The Paperless stack (`compose/core/paperless`) needs a few things on the `core` 
 
 The stack's values live in a **dedicated Bitwarden Secrets Manager project for Paperless**, and the Dockhand machine-account token for this stack has access to that project only. Dockhand injects the whole project into the deploy environment, so nothing unrelated should sit in it.
 
-The compose file uses plain `${VAR}`: an unset variable becomes an empty string rather than stopping the deploy. Before every first deploy (and after editing the project), check:
+The compose file uses plain `${VAR}`: an unset variable becomes an empty string rather than stopping the deploy. `CORE_LAN_IP` is the exception, because Compose rejects an empty port `host_ip`. CI validates with placeholder values from `.github/ci.env`, which are never deployed. Before every first deploy (and after editing the project), check:
 
 | Variable | Required | Notes |
 |---|---|---|
 | `PAPERLESS_SECRET_KEY` | yes | Generate with `python3 -c "import secrets; print(secrets.token_urlsafe(64))"`. Paperless won't start without it. |
 | `PAPERLESS_DB_PASSWORD` | yes | Used by the webserver, db and db-backup. Only applied when the database is first created; to change it later, run `ALTER USER paperless WITH PASSWORD '...'` in the db first. |
 | `PAPERLESS_URL` | **yes** | The `https://` URL Zoraxy serves, without a trailing slash. **Empty fails open**: allowed hosts become `*` and no CSRF origin is set. |
-| `CORE_LAN_IP` | **yes** | Core's LAN address. Ports 8000 and 445 bind to it. **Empty fails open**: the ports bind to every interface. |
+| `CORE_LAN_IP` | **yes** | Core's LAN address. Ports 8000 and 445 bind to it. **Empty fails closed**: Compose rejects the empty `host_ip` ("invalid ip address") and the stack doesn't deploy. |
 | `SMB_HOSTS_ALLOW` | **yes, in practice** | The printer's address(es). Optional for Compose, but **empty fails open**: Samba then allows every host. |
 | `SMB_PASSWORD` | yes | Password for the Samba user `scanner`. |
 | `PAPERLESS_UID`, `PAPERLESS_GID` | yes | Owner of `/srv/homelab/paperless`. Samba and NFS write as this UID. |
