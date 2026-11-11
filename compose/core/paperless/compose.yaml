@@ -137,7 +137,61 @@ services:
       timeout: 5s
       retries: 5
 
+  samba:
+    # Printer scan-to-folder ingest (SMB). Writes only into consume/smb.
+    # Hardening is mandatory: SMB 2.1 minimum, mandatory signing, no guest,
+    # no anonymous, printer address only. Some printers only speak SMB1 or
+    # can't sign; if this one can't connect, STOP and ask. Never downgrade.
+    # The entrypoint prints smb.conf to the log, so no secret goes in any
+    # SAMBA_* variable. Config is applied once at init: recreate the container
+    # (don't just restart it) after changing a value.
+    image: ghcr.io/servercontainers/samba:smbd-only-a3.24.4-s4.23.8-r0@sha256:802d9318ccb9ebe6eeb76766b43016451c24b60762450ec039f53a75179963f4
+    container_name: paperless-samba
+    restart: unless-stopped
+    ports:
+      # 445 only, bound to core's LAN address. The host firewall (DOCKER-USER)
+      # allows 445 from the printer only.
+      - target: 445
+        published: "445"
+        host_ip: ${CORE_LAN_IP}
+        protocol: tcp
+    networks:
+      - smb # own network: no route to db or broker
+    environment:
+      - FAIL_FAST=1
+      - NETBIOS_DISABLE=1 # disable netbios = yes; no nmbd
+      - WSDD2_DISABLE=1
+      - AVAHI_DISABLE=1
+      - SAMBA_CONF_MAP_TO_GUEST=Never
+      - SAMBA_GLOBAL_CONFIG_hosts_SPACE_allow=${SMB_HOSTS_ALLOW} # printer address(es); empty would allow all hosts
+      - SAMBA_GLOBAL_CONFIG_hosts_SPACE_deny=ALL
+      - SAMBA_GLOBAL_CONFIG_restrict_SPACE_anonymous=2
+      - SAMBA_GLOBAL_CONFIG_server_SPACE_min_SPACE_protocol=SMB2_10
+      - SAMBA_GLOBAL_CONFIG_server_SPACE_signing=mandatory
+      - SAMBA_GLOBAL_CONFIG_smb_SPACE_ports=445
+      - SAMBA_GLOBAL_CONFIG_wide_SPACE_links=no
+      - SAMBA_GLOBAL_CONFIG_follow_SPACE_symlinks=no
+      - ACCOUNT_scanner=${SMB_PASSWORD}
+      - UID_scanner=${PAPERLESS_UID} # files are owned by the Paperless UID; the setgid dir supplies the group
+      - SAMBA_VOLUME_CONFIG_consume=[consume]; path = /shares; valid users = scanner; guest ok = no; read only = no; browseable = no; force user = scanner; create mask = 0660; directory mask = 2770
+    volumes:
+      # Mounted at the image's VOLUME path so no anonymous volume is created.
+      - /srv/homelab/paperless/consume/smb:/shares
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add: # minimal set for smbd; to be confirmed on core (see infrastructure/README.md)
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+      - NET_BIND_SERVICE
+      - KILL
+
 networks:
   frontend: {} # webserver's published port and egress
   backend:
     internal: true # db, broker, db-backup and webserver only; no egress, no published ports
+  smb: {} # samba only
