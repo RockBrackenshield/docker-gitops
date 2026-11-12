@@ -158,6 +158,30 @@ valid_id() { [[ $1 =~ ^[1-9][0-9]{0,9}$ ]]; }
 valid_ipv4() { [[ $1 =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; }
 valid_cidr4() { [[ $1 =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]]; }
 
+# ipv4_int IP: strict dotted quad (0-255, no leading zeros) -> 32-bit integer.
+ipv4_int() {
+  local o v=0
+  [[ $1 =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  for o in "${BASH_REMATCH[@]:1}"; do
+    [[ $o =~ ^(0|[1-9][0-9]*)$ ]] && (( o <= 255 )) || return 1
+    v=$(( v * 256 + o ))
+  done
+  printf '%s' "$v"
+}
+
+# cidr4_within INNER OUTER: both strict IPv4 CIDRs, INNER no wider than OUTER
+# and inside it. Used to keep ZORAXY_SOURCE_CIDR inside INFRA_EDGE_SUBNET.
+cidr4_within() {
+  local ia il oa ol mask
+  [[ $1 =~ ^([^/]+)/(0|[1-9][0-9]?)$ ]] || return 1
+  il=${BASH_REMATCH[2]}; ia=$(ipv4_int "${BASH_REMATCH[1]}") || return 1
+  [[ $2 =~ ^([^/]+)/(0|[1-9][0-9]?)$ ]] || return 1
+  ol=${BASH_REMATCH[2]}; oa=$(ipv4_int "${BASH_REMATCH[1]}") || return 1
+  (( il <= 32 && ol <= 32 && il >= ol )) || return 1
+  mask=$(( ol == 0 ? 0 : (0xFFFFFFFF << (32 - ol)) & 0xFFFFFFFF ))
+  (( (ia & mask) == (oa & mask) ))
+}
+
 # read_marker FILE: the Dockhand :3000 marker in an existing firewall.env.
 read_marker() {
   local f=$1 m=''
@@ -171,7 +195,14 @@ read_marker() {
 # Dockhand marker is preserved (a new install starts locked; allowlist is
 # never turned back into lock or removed).
 render_firewall_env() {
-  local role=$1 dir=$2 old=$3 n
+  local role=$1 dir=$2 old=$3 n zcidr edge
+  if [ "$role" = infrastructure ]; then
+    # Zoraxy's source range must sit inside its Docker network (fails closed;
+    # homelab-firewall.sh also requires /16 or longer).
+    zcidr=$(<"$dir/ZORAXY_SOURCE_CIDR") && edge=$(<"$dir/INFRA_EDGE_SUBNET") \
+      && cidr4_within "$zcidr" "$edge" \
+      || { echo "ZORAXY_SOURCE_CIDR must be an IPv4 CIDR inside INFRA_EDGE_SUBNET" >&2; return 1; }
+  fi
   echo '# Written by host/bootstrap.sh. Private values: never commit this file.'
   echo "ROLE=$role"
   if [ "$role" = infrastructure ]; then
@@ -408,7 +439,8 @@ done_firewall() {
 step_firewall() {
   STEP=4-firewall
   local new=$RUNDIR/firewall.env units_changed='' u
-  render_firewall_env "$ROLE" "$RUNDIR" "$FW_ENV" > "$new"
+  render_firewall_env "$ROLE" "$RUNDIR" "$FW_ENV" > "$new" \
+    || die "firewall values from bws do not validate (nothing changed)"
   bash "$REPO/host/firewall/homelab-firewall.sh" --check --env "$new" >/dev/null \
     || die "firewall values from bws do not validate (nothing changed)"
   install -d -m 0700 -o root -g root /etc/homelab

@@ -76,6 +76,8 @@ load_env() {
     infrastructure)
       is_ipv4 "$INFRA_LAN_IP"        || die "INFRA_LAN_IP missing or not an IPv4 address"
       is_cidr4 "$ZORAXY_SOURCE_CIDR" || die "ZORAXY_SOURCE_CIDR missing or not an IPv4 CIDR"
+      # One typo must not open :2586/:3000/:9898/:8102 (e.g. /0): /16 or longer.
+      (( 10#${ZORAXY_SOURCE_CIDR##*/} >= 16 )) || die "ZORAXY_SOURCE_CIDR must be /16 or longer"
       [[ $DOCKHAND_3000 == lock || $DOCKHAND_3000 == allowlist ]] \
         || die "DOCKHAND_3000 must be lock or allowlist"
       [ -z "$PRINTER_IP$LAPTOP_IP$PRINTER_IPV6$LAPTOP_IPV6" ] || die "core-only keys set on infrastructure"
