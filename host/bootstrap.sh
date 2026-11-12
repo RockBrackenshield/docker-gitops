@@ -33,8 +33,8 @@ BWS_VERSION='bws 2.1.0'
 #   (GitHub asset digest and bws-sha256-checksums-2.1.0.txt)
 # sha256 of the extracted /usr/local/bin/bws. Bitwarden publishes digests for
 # the zip only, so this value comes from Rock's verified install.
-# TBD: preflight fails closed until this is a real 64-character sha256.
-BWS_BIN_SHA256=TBD-set-after-rocks-install
+# Recorded from Rock's installed bws 2.1.0 (Nov 12, 2026).
+BWS_BIN_SHA256=3633cb277faf94fb446fa8eff492d447ed4b1b1fbc2bbf59528e034c06bdc167
 BWS_SERVER_BASE=https://vault.bitwarden.com   # US cloud
 DOCKHAND_SERVER_URL=''                         # empty for the US cloud
 
