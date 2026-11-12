@@ -8,7 +8,7 @@ SD card, without Ansible: cloud-init for first boot, one re-runnable
 | File | What it is |
 |---|---|
 | `infrastructure/user-data`, `core/user-data` | cloud-init `#cloud-config` per node. Placeholders only: `<admin-user>`, `<ssh-public-key>`. |
-| `bootstrap.sh` | Run once on the node after first boot; safe to re-run. Reads secrets with one `bws run`. |
+| `bootstrap.sh` | Run once on the node after first boot; safe to re-run. Reads secrets with one `bws secret list -o env`, parsed against each node's name allowlist. |
 | `firewall/homelab-firewall.sh` | Validates `/etc/homelab/firewall.env` and applies the node's rules (`--early`, `--docker`, `--check`, `--remove`). |
 | `firewall/homelab-firewall-early.service` | Loads the raw/INPUT rules before the network and Docker. `RequiredBy=docker.service`, so it fails closed. |
 | `firewall/homelab-firewall-docker.service` | Adds the `DOCKER-USER` second layer after Docker starts. |
@@ -85,7 +85,7 @@ secrets; a re-run on a finished node prints `skipped` for every step.
 | # | Step | Node |
 |---|---|---|
 | 0 | Preflight: root, role from `hostname -s`, aarch64, terminal, cloud-init done, Docker + Compose, Docker firewall backend `iptables`, root-owned clone, prints HEAD (information only), bws hash and version | both |
-| 1 | One `bws -p default run --no-inherit-env`: values go to files in a tmpfs dir under `/run`; fails if the account returns any unexpected secret name | both |
+| 1 | One `bws -p default secret list -o env` on a pipe, parsed by `bootstrap.sh` (strict `NAME="VALUE"` lines, no quotes, backslashes or newlines in values): values go to files in a tmpfs dir under `/run`; no secret becomes an environment variable; fails before writing anything if the account returns any unexpected, duplicate, missing or unparsable secret | both |
 | 2 | `ntfy` system user/group with `NTFY_UID/GID`, `/srv/homelab/ntfy` `0700` (infrastructure); Paperless ownership and modes (core) | both |
 | 3 | Docker networks `infra_edge`, `infra_internal` with fixed subnets (never recreated on mismatch) | infrastructure |
 | 4 | Firewall: validate and write `/etc/homelab/firewall.env`, install the script and both units, enable, apply | both |

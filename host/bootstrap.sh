@@ -9,21 +9,21 @@
 #
 # Flags: none for the normal run; --unlock-dockhand (infrastructure, after
 # Dockhand authentication is on); --restore-prep is reserved for the
-# restore-runbook PR; --stage-secrets <dir> is internal (only inside bws run,
-# as `/bin/bash -p`, which ignores BASH_ENV and functions in the environment).
+# restore-runbook PR.
 #
 # The bws access token is read once from /dev/tty, never from argv, a file or
 # the environment, is passed only to the one bws process, and is unset right
-# after. Secret values only ever go to files in a tmpfs directory under /run
-# that is deleted on every exit. Nothing secret is printed or logged.
+# after. Secrets come from `bws secret list -o env` on a pipe and are parsed
+# here against the node's name allowlist; no secret name ever becomes an
+# environment variable. Values only ever go to files in a tmpfs directory
+# under /run that is deleted on every exit. Nothing secret is printed or logged.
 # Never add `set -x` to this file.
 
 set -euo pipefail
 shopt -s inherit_errexit
 refuse_xtrace() { case $- in *x*) echo "refusing to run with xtrace" >&2; exit 1 ;; esac; }
 refuse_xtrace
-# Fixed PATH in every mode: in --stage-secrets the environment comes from bws,
-# where a secret named PATH would replace it (child_env_ok rejects that too).
+# Fixed PATH in every mode, whatever the caller's environment holds.
 SAFE_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH=$SAFE_PATH
 umask 077
@@ -92,9 +92,7 @@ optional_names() {
 check_names() {
   local role=$1 n; shift
   local -A got=()
-  for n in "$@"; do
-    case $n in PATH|PWD|OLDPWD|SHLVL|_) ;; *) got[$n]=1 ;; esac
-  done
+  for n in "$@"; do got[$n]=1; done
   local missing=()
   for n in $(expected_names "$role"); do
     [[ -n ${got[$n]+x} ]] || missing+=("$n")
@@ -109,41 +107,36 @@ check_names() {
   fi
 }
 
-# child_env_ok ENVIRON SAFE_PATH: the --stage-secrets child's own starting
-# environment (NUL-separated, /proc/$$/environ) must not hold names that bash
-# acts on: no BASH* name (BASH_ENV, BASH_FUNC_*%%, BASHOPTS, ...) and no PATH
-# other than the one this script exported to bws (a secret named PATH would
-# replace it). Reads the raw environment, so names that are not valid shell
-# identifiers are seen too. Prints names only, never values.
-child_env_ok() {
-  local file=$1 safe=$2 e n bad=()
-  local -a envs=()
-  [ -r "$file" ] || { echo "cannot read the child environment" >&2; return 1; }
-  mapfile -d '' -t envs < "$file"
-  for e in "${envs[@]}"; do
-    n=${e%%=*}
-    case $n in
-      PATH) [ "${e#PATH=}" = "$safe" ] || bad+=(PATH) ;;
-      BASH*) bad+=("$n") ;;
-    esac
-  done
-  if [ "${#bad[@]}" -gt 0 ]; then
-    echo "refusing secret names that bash would act on: ${bad[*]}" >&2; return 1
-  fi
-}
-
-# stage_secrets ROLE DIR: runs inside `bws run --no-inherit-env`, so the
-# environment is PATH plus the project's secrets. Writes each value to a file.
+# stage_secrets ROLE DIR: reads `bws secret list -o env` output on stdin.
+# bws 2.1.0 prints NAME="VALUE" per line and escapes nothing, so only lines
+# matching ^[A-Z0-9_]+="[^"\\]*"$ are accepted. Anything else fails closed:
+# the comment bws prints for a non-POSIX name, a quote, backslash or newline
+# inside a value, a blank line. The names must be exactly the node's set (no
+# duplicates, no extras such as LD_PRELOAD or PATH) before any value is
+# written. Values stay in this function and go only to files in DIR; names
+# never become variables. Prints names and line numbers only, never values.
 stage_secrets() {
-  local role=$1 dir=$2 n names
-  mapfile -t names < <(compgen -e)
-  check_names "$role" "${names[@]}"
-  for n in $(expected_names "$role"); do
-    [ -n "${!n-}" ] || { echo "secret $n is empty" >&2; return 1; }
-    printf '%s' "${!n}" > "$dir/$n"
+  local role=$1 dir=$2 line name n=0
+  local re='^([A-Z0-9_]+)="([^"\\]*)"$'
+  local -A vals=()
+  local names=()
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n+1))
+    [[ $line =~ $re ]] || { echo "bws output line $n is not NAME=\"VALUE\" (line not shown)" >&2; return 1; }
+    name=${BASH_REMATCH[1]}
+    [[ -z ${vals[$name]+x} ]] || { echo "duplicate secret name: $name" >&2; return 1; }
+    vals[$name]=${BASH_REMATCH[2]}
+    names+=("$name")
   done
-  for n in $(optional_names "$role"); do
-    if [ -n "${!n-}" ]; then printf '%s' "${!n}" > "$dir/$n"; fi
+  check_names "$role" "${names[@]}" || return 1
+  for name in $(expected_names "$role"); do
+    [ -n "${vals[$name]}" ] || { echo "secret $name is empty" >&2; return 1; }
+  done
+  for name in $(expected_names "$role"); do
+    printf '%s' "${vals[$name]}" > "$dir/$name" || return 1
+  done
+  for name in $(optional_names "$role"); do
+    if [ -n "${vals[$name]-}" ]; then printf '%s' "${vals[$name]}" > "$dir/$name" || return 1; fi
   done
 }
 
@@ -382,8 +375,10 @@ need_secrets() {
   echo > /dev/tty
   [ -n "$BWS_TOKEN" ] || die "empty token"
   TOKEN_ENTERED=1
+  # Values arrive on the pipe and are parsed in this script (stage_secrets);
+  # the token is only in bws's own environment.
   if ! BWS_ACCESS_TOKEN=$BWS_TOKEN BWS_CONFIG_FILE=$RUNDIR/bws.toml \
-      "$BWS" -p default run --no-inherit-env --shell /bin/sh -- "/bin/bash -p $REPO/host/bootstrap.sh --stage-secrets $RUNDIR"; then
+      "$BWS" -p default secret list -o env --color no | stage_secrets "$ROLE" "$RUNDIR"; then
     unset -v BWS_TOKEN
     die "bws login or secret staging failed (nothing that needs secrets was changed)"
   fi
@@ -687,15 +682,6 @@ main() {
       init_log; unlock_dockhand ;;
     --restore-prep)
       echo "--restore-prep is reserved for the restore-runbook PR" >&2; exit 2 ;;
-    --stage-secrets)
-      # Names first, before any value is read or written.
-      child_env_ok "/proc/$$/environ" "$SAFE_PATH" || die "unsafe secret names in the bootstrap project"
-      case $- in *p*) ;; *) die "--stage-secrets must run as /bin/bash -p" ;; esac
-      [ $# -eq 2 ] || die "--stage-secrets needs a directory"
-      [[ $2 =~ ^/run/homelab-bootstrap\.[A-Za-z0-9]{6}$ ]] || die "bad staging directory"
-      [ "$EUID" -eq 0 ] && [ "$(stat -c '%u %a' "$2")" = '0 700' ] || die "staging directory must be root 0700"
-      ROLE=$(hostname -s)
-      stage_secrets "$ROLE" "$2" ;;
     *) die "unknown argument: $1 (use no argument, --unlock-dockhand or --restore-prep)" ;;
   esac
 }
