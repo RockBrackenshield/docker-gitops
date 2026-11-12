@@ -1,0 +1,13 @@
+# Installed by host/bootstrap.sh to /etc/systemd/system/; never enabled (no
+# [Install]). Started only by OnFailure= in homelab-firewall-early.service, to
+# say on the console and to logged-in users that the firewall did not load and
+# Docker (and host NFS on core) are held down.
+[Unit]
+Description=homelab firewall notice: the early unit failed
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+StandardOutput=journal+console
+ExecStart=/bin/echo "homelab-firewall-early.service FAILED: Docker (and NFS on core) stay down. Check: journalctl -u homelab-firewall-early and sudo homelab-firewall.sh --check (host/README.md)."
+ExecStart=-/usr/bin/wall "homelab-firewall-early.service FAILED: Docker (and NFS on core) stay down. Check: journalctl -u homelab-firewall-early and sudo homelab-firewall.sh --check (host/README.md)."

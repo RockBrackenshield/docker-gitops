@@ -12,6 +12,7 @@ SD card, without Ansible: cloud-init for first boot, one re-runnable
 | `firewall/homelab-firewall.sh` | Validates `/etc/homelab/firewall.env` and applies the node's rules (`--early`, `--docker`, `--check`, `--remove`). |
 | `firewall/homelab-firewall-early.service` | Loads the raw/INPUT rules before the network, Docker and host NFS. `RequiredBy=docker.service nfs-server.service`, so it fails closed. |
 | `firewall/homelab-firewall-docker.service` | Adds the `DOCKER-USER` second layer after Docker starts. |
+| `firewall/homelab-firewall-alert.service` | Not enabled; started by the early unit's `OnFailure=` to print a notice on the console and through `wall`. |
 
 **Never commit a filled-in `user-data`**, and never put a password, `passwd`,
 `plain_text_passwd` or a Wi-Fi PSK in `user-data` or `network-config`
@@ -88,7 +89,7 @@ secrets; a re-run on a finished node prints `skipped` for every step.
 | 1 | One `bws -p default secret list -o env` on a pipe, parsed by `bootstrap.sh` (strict `NAME="VALUE"` lines, no quotes, backslashes or newlines in values): values go to files in a tmpfs dir under `/run`; no secret becomes an environment variable; fails before writing anything if the account returns any unexpected, duplicate, missing or unparsable secret | both |
 | 2 | `ntfy` system user/group with `NTFY_UID/GID`, `/srv/homelab/ntfy` `0700` (infrastructure); Paperless ownership and modes (core) | both |
 | 3 | Docker networks `infra_edge`, `infra_internal` with fixed subnets (never recreated on mismatch) | infrastructure |
-| 4 | Firewall: validate and write `/etc/homelab/firewall.env`, install the script and both units, enable, apply | both |
+| 4 | Firewall: validate and write `/etc/homelab/firewall.env`, install the script and the three units, enable the early and Docker units, apply | both |
 | 5 | Port 53 free for AdGuard (verify only) | infrastructure |
 | 6 | NFS export `/etc/exports.d/paperless.exports` | core |
 | 7 | Tailscale join (below) | infrastructure |

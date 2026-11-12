@@ -47,7 +47,8 @@ LOG=/var/log/homelab-bootstrap.log
 FW_ENV=/etc/homelab/firewall.env
 FW_SCRIPT=/usr/local/sbin/homelab-firewall.sh
 UNIT_DIR=/etc/systemd/system
-FW_UNITS=(homelab-firewall-early.service homelab-firewall-docker.service)
+FW_UNITS=(homelab-firewall-early.service homelab-firewall-docker.service)      # enabled
+FW_UNIT_FILES=("${FW_UNITS[@]}" homelab-firewall-alert.service)               # installed (alert: OnFailure= only)
 DOCKHAND_URL=http://127.0.0.1:3000
 TS_STATE=/srv/homelab/tailscale/state/tailscaled.state
 
@@ -451,8 +452,11 @@ done_firewall() {
   [ -f "$FW_ENV" ] && [ -x "$FW_SCRIPT" ] || return 1
   cmp -s "$REPO/host/firewall/homelab-firewall.sh" "$FW_SCRIPT" || return 1
   local u
+  for u in "${FW_UNIT_FILES[@]}"; do
+    cmp -s "$REPO/host/firewall/$u" "$UNIT_DIR/$u" || return 1
+  done
   for u in "${FW_UNITS[@]}"; do
-    cmp -s "$REPO/host/firewall/$u" "$UNIT_DIR/$u" && systemctl is-enabled --quiet "$u" || return 1
+    systemctl is-enabled --quiet "$u" || return 1
   done
   "$FW_SCRIPT" --check >/dev/null 2>&1 || return 1
   iptables -w -t raw -C PREROUTING -j HOMELAB-RAW 2>/dev/null || return 1
@@ -470,7 +474,7 @@ step_firewall() {
   install -d -m 0700 -o root -g root /etc/homelab
   install_file "$new" "$FW_ENV" 0600 >/dev/null
   install_file "$REPO/host/firewall/homelab-firewall.sh" "$FW_SCRIPT" 0755 >/dev/null
-  for u in "${FW_UNITS[@]}"; do
+  for u in "${FW_UNIT_FILES[@]}"; do
     units_changed+=$(install_file "$REPO/host/firewall/$u" "$UNIT_DIR/$u" 0644)
   done
   if [ -n "$units_changed" ]; then systemctl daemon-reload; fi

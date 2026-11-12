@@ -8,12 +8,14 @@
 # Never `systemctl restart` this unit: Requires= would restart Docker (and
 # nfs-server) too.
 # To re-apply, run `/usr/local/sbin/homelab-firewall.sh --early` directly.
+# OnFailure= starts homelab-firewall-alert.service (console and wall notice).
 [Unit]
 Description=homelab firewall, raw/INPUT rules (before network and Docker)
 DefaultDependencies=no
 After=local-fs.target
 Before=network-pre.target docker.service nfs-server.service
 Wants=network-pre.target
+OnFailure=homelab-firewall-alert.service
 
 [Service]
 Type=oneshot
