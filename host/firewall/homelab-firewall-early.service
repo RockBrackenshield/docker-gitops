@@ -2,13 +2,17 @@
 # Loads the raw PREROUTING (and, on core, INPUT) rules before the network and
 # Docker come up. RequiredBy=docker.service: if this unit fails (for example
 # an invalid /etc/homelab/firewall.env), Docker does not start (fails closed).
-# Never `systemctl restart` this unit: Requires= would restart Docker too.
+# RequiredBy=nfs-server.service does the same for host NFS on core, which does
+# not depend on Docker (on infrastructure, which has no nfs-server, the link
+# is inert).
+# Never `systemctl restart` this unit: Requires= would restart Docker (and
+# nfs-server) too.
 # To re-apply, run `/usr/local/sbin/homelab-firewall.sh --early` directly.
 [Unit]
 Description=homelab firewall, raw/INPUT rules (before network and Docker)
 DefaultDependencies=no
 After=local-fs.target
-Before=network-pre.target docker.service
+Before=network-pre.target docker.service nfs-server.service
 Wants=network-pre.target
 
 [Service]
@@ -17,5 +21,5 @@ RemainAfterExit=yes
 ExecStart=/usr/local/sbin/homelab-firewall.sh --early
 
 [Install]
-RequiredBy=docker.service
+RequiredBy=docker.service nfs-server.service
 WantedBy=multi-user.target

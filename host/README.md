@@ -10,7 +10,7 @@ SD card, without Ansible: cloud-init for first boot, one re-runnable
 | `infrastructure/user-data`, `core/user-data` | cloud-init `#cloud-config` per node. Placeholders only: `<admin-user>`, `<ssh-public-key>`. |
 | `bootstrap.sh` | Run once on the node after first boot; safe to re-run. Reads secrets with one `bws secret list -o env`, parsed against each node's name allowlist. |
 | `firewall/homelab-firewall.sh` | Validates `/etc/homelab/firewall.env` and applies the node's rules (`--early`, `--docker`, `--check`, `--remove`). |
-| `firewall/homelab-firewall-early.service` | Loads the raw/INPUT rules before the network and Docker. `RequiredBy=docker.service`, so it fails closed. |
+| `firewall/homelab-firewall-early.service` | Loads the raw/INPUT rules before the network, Docker and host NFS. `RequiredBy=docker.service nfs-server.service`, so it fails closed. |
 | `firewall/homelab-firewall-docker.service` | Adds the `DOCKER-USER` second layer after Docker starts. |
 
 **Never commit a filled-in `user-data`**, and never put a password, `passwd`,
@@ -166,7 +166,7 @@ and Zoraxy reach `:3000`, permanently. There is no "open" state.
 3. The repo checks above, and `stat -c '%U %a' /srv/homelab/docker-gitops/host/bootstrap.sh` = `root 755`.
 4. `sha256sum /usr/local/bin/bws` = `BWS_BIN_SHA256`; `bws --version` = `bws 2.1.0`.
 5. A re-run prints `skipped` for every step and doesn't ask for a token.
-6. `systemctl is-active homelab-firewall-early homelab-firewall-docker`; `systemctl show docker -p Requires` lists the early unit; `sudo iptables -t raw -S HOMELAB-RAW`, `sudo ip6tables -t raw -S HOMELAB-RAW`, `sudo iptables -S HOMELAB-DOCKER` (and on core `sudo iptables -S HOMELAB-INPUT`) show each rule once; the same after `sudo reboot`.
+6. `systemctl is-active homelab-firewall-early homelab-firewall-docker`; `systemctl show docker -p Requires` (and on core `systemctl show nfs-server -p Requires`) lists the early unit; `sudo iptables -t raw -S HOMELAB-RAW`, `sudo ip6tables -t raw -S HOMELAB-RAW`, `sudo iptables -S HOMELAB-DOCKER` (and on core `sudo iptables -S HOMELAB-INPUT`) show each rule once; the same after `sudo reboot`.
 7. infrastructure, from a LAN host and a tailnet device: `:2586`, `:3000`, `:8000`, `:9898` and `:8102` time out; `:3000` stays blocked after a reboot before the unlock and after the unlock; after the unlock the anonymous probe returns `403`; `docker exec zoraxy ip route get <infra-lan-ip>` shows a `src` inside `ZORAXY_SOURCE_CIDR`.
 8. infrastructure, Tailscale, right after bootstrap: `docker exec tailscale tailscale status` is logged in; `docker inspect tailscale` shows no `TS_AUTHKEY` value and no `/run/homelab-bootstrap` mount; `docker logs tailscale 2>&1 | grep -c 'tskey-'` = `0`. After Dockhand redeploys the stack, `TS_AUTHKEY` is visible again (accepted risk below).
 9. core: `sudo exportfs -v` lists only the laptop export; `rpcinfo -p` fails; the laptop can write and files land as the Paperless UID.
