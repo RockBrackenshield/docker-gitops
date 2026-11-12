@@ -200,7 +200,8 @@ render_firewall_env() {
   local role=$1 dir=$2 old=$3 n zcidr edge
   if [ "$role" = infrastructure ]; then
     # Zoraxy's source range must sit inside its Docker network (fails closed;
-    # homelab-firewall.sh also requires /16 or longer).
+    # homelab-firewall.sh checks this again at every boot and requires /16 or
+    # longer).
     zcidr=$(<"$dir/ZORAXY_SOURCE_CIDR") && edge=$(<"$dir/INFRA_EDGE_SUBNET") \
       && cidr4_within "$zcidr" "$edge" \
       || { echo "ZORAXY_SOURCE_CIDR must be an IPv4 CIDR inside INFRA_EDGE_SUBNET" >&2; return 1; }
@@ -210,6 +211,7 @@ render_firewall_env() {
   if [ "$role" = infrastructure ]; then
     echo "INFRA_LAN_IP=$(<"$dir/INFRA_LAN_IP")"
     echo "ZORAXY_SOURCE_CIDR=$(<"$dir/ZORAXY_SOURCE_CIDR")"
+    echo "INFRA_EDGE_SUBNET=$(<"$dir/INFRA_EDGE_SUBNET")"
     echo "DOCKHAND_3000=$(read_marker "$old")"
   else
     for n in INFRA_LAN_IP PRINTER_IP LAPTOP_IP; do echo "$n=$(<"$dir/$n")"; done

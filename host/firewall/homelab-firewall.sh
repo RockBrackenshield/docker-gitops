@@ -48,6 +48,21 @@ is_cidr4() {
   addr=${BASH_REMATCH[1]} len=${BASH_REMATCH[2]}
   is_ipv4 "$addr" && (( 10#$len <= 32 ))
 }
+ipv4_to_int() {   # caller has checked is_ipv4
+  local o v=0 IFS=.
+  for o in $1; do v=$(( v * 256 + 10#$o )); done
+  echo "$v"
+}
+# cidr4_within INNER OUTER: INNER is no wider than OUTER and inside it.
+cidr4_within() {
+  local il=${1##*/} ol=${2##*/} ia oa mask
+  is_cidr4 "$1" && is_cidr4 "$2" || return 1
+  il=$((10#$il)) ol=$((10#$ol))
+  (( il >= ol )) || return 1
+  ia=$(ipv4_to_int "${1%/*}") oa=$(ipv4_to_int "${2%/*}")
+  mask=$(( ol == 0 ? 0 : (0xFFFFFFFF << (32 - ol)) & 0xFFFFFFFF ))
+  (( (ia & mask) == (oa & mask) ))
+}
 is_ipv6() {
   local ip=$1
   [[ $ip =~ ^[0-9A-Fa-f:]+$ && $ip == *:*:* && ${#ip} -le 39 ]]
@@ -58,7 +73,7 @@ is_ipv6() {
 load_env() {
   local file=$1 line key val n=0
   [ -r "$file" ] || die "cannot read $file"
-  ROLE='' INFRA_LAN_IP='' ZORAXY_SOURCE_CIDR='' DOCKHAND_3000=''
+  ROLE='' INFRA_LAN_IP='' ZORAXY_SOURCE_CIDR='' INFRA_EDGE_SUBNET='' DOCKHAND_3000=''
   PRINTER_IP='' LAPTOP_IP='' PRINTER_IPV6='' LAPTOP_IPV6=''
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n+1))
@@ -66,7 +81,7 @@ load_env() {
     [[ $line =~ ^([A-Z0-9_]+)=(.*)$ ]] || die "$file:$n: not KEY=VALUE"
     key=${BASH_REMATCH[1]} val=${BASH_REMATCH[2]}
     case $key in
-      ROLE|INFRA_LAN_IP|ZORAXY_SOURCE_CIDR|DOCKHAND_3000|PRINTER_IP|LAPTOP_IP|PRINTER_IPV6|LAPTOP_IPV6)
+      ROLE|INFRA_LAN_IP|ZORAXY_SOURCE_CIDR|INFRA_EDGE_SUBNET|DOCKHAND_3000|PRINTER_IP|LAPTOP_IP|PRINTER_IPV6|LAPTOP_IPV6)
         printf -v "$key" '%s' "$val" ;;
       *) die "$file:$n: unknown key $key" ;;
     esac
@@ -78,6 +93,11 @@ load_env() {
       is_cidr4 "$ZORAXY_SOURCE_CIDR" || die "ZORAXY_SOURCE_CIDR missing or not an IPv4 CIDR"
       # One typo must not open :2586/:3000/:9898/:8102 (e.g. /0): /16 or longer.
       (( 10#${ZORAXY_SOURCE_CIDR##*/} >= 16 )) || die "ZORAXY_SOURCE_CIDR must be /16 or longer"
+      [ -n "$INFRA_EDGE_SUBNET" ] \
+        || die "INFRA_EDGE_SUBNET missing (firewall.env is older than this script): re-run host/bootstrap.sh"
+      is_cidr4 "$INFRA_EDGE_SUBNET"  || die "INFRA_EDGE_SUBNET is not an IPv4 CIDR"
+      cidr4_within "$ZORAXY_SOURCE_CIDR" "$INFRA_EDGE_SUBNET" \
+        || die "ZORAXY_SOURCE_CIDR must sit inside INFRA_EDGE_SUBNET"
       [[ $DOCKHAND_3000 == lock || $DOCKHAND_3000 == allowlist ]] \
         || die "DOCKHAND_3000 must be lock or allowlist"
       [ -z "$PRINTER_IP$LAPTOP_IP$PRINTER_IPV6$LAPTOP_IPV6" ] || die "core-only keys set on infrastructure"
@@ -88,7 +108,7 @@ load_env() {
       is_ipv4 "$LAPTOP_IP"    || die "LAPTOP_IP missing or not an IPv4 address"
       [ -z "$PRINTER_IPV6" ] || is_ipv6 "$PRINTER_IPV6" || die "PRINTER_IPV6 is not an IPv6 address"
       [ -z "$LAPTOP_IPV6" ]  || is_ipv6 "$LAPTOP_IPV6"  || die "LAPTOP_IPV6 is not an IPv6 address"
-      [ -z "$ZORAXY_SOURCE_CIDR$DOCKHAND_3000" ] || die "infrastructure-only keys set on core"
+      [ -z "$ZORAXY_SOURCE_CIDR$INFRA_EDGE_SUBNET$DOCKHAND_3000" ] || die "infrastructure-only keys set on core"
       ;;
     *) die "ROLE must be infrastructure or core" ;;
   esac
