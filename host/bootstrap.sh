@@ -54,6 +54,7 @@ TS_STATE=/srv/homelab/tailscale/state/tailscaled.state
 ROLE=''
 RUNDIR=''
 BWS_TOKEN=''
+TOKEN_ENTERED=0            # 1 once a bws token was typed: cleanup reminds to revoke it
 LOG_READY=0
 
 # --- output -----------------------------------------------------------------
@@ -144,6 +145,14 @@ stage_secrets() {
   for n in $(optional_names "$role"); do
     if [ -n "${!n-}" ]; then printf '%s' "${!n}" > "$dir/$n"; fi
   done
+}
+
+# root_owned_not_writable "UID MODE" (stat -c '%u %a'): owner root, no
+# group/world write bit.
+root_owned_not_writable() {
+  local uid mode
+  read -r uid mode <<<"$1" || return 1
+  [ "$uid" = 0 ] && [[ $mode =~ ^[0-7]{3,4}$ ]] && (( (8#$mode & 8#022) == 0 ))
 }
 
 # bws_pin_ok PIN: fails closed unless PIN is a sha256 and matches the binary.
@@ -283,9 +292,18 @@ init_log() {
   LOG_READY=1
 }
 
+# cleanup: runs from the EXIT trap and at the end of a normal run, so the
+# revocation reminder shows on failures too (printed once).
 cleanup() {
   if [ -n "$RUNDIR" ] && [ -d "$RUNDIR" ]; then rm -rf -- "$RUNDIR"; fi
   unset -v BWS_TOKEN
+  if [ "$TOKEN_ENTERED" = 1 ]; then
+    TOKEN_ENTERED=0
+    cat >&2 <<'MSG'
+
+Revoke the bootstrap access token now (Bitwarden > Machine accounts > bootstrap-<node> > Access tokens).
+MSG
+  fi
 }
 
 have_tty() { { : </dev/tty; } 2>/dev/null; }
@@ -303,6 +321,12 @@ ts_running() {
   st=$(docker exec tailscale tailscale status --json 2>/dev/null || true)
   [[ $st =~ \"BackendState\":[[:space:]]*\"Running\" ]]
 }
+# ts_logs_clean: no 'tskey-' in the current tailscale container's log.
+ts_logs_clean() {
+  local n
+  n=$(docker logs tailscale 2>&1 | grep -c 'tskey-' || true)
+  [ "$n" = 0 ] || { echo "docker logs tailscale contain 'tskey-' ($n lines)" >&2; return 1; }
+}
 wait_ts_running() {
   local _
   for _ in $(seq 1 60); do ts_running && return 0; sleep 2; done
@@ -310,7 +334,7 @@ wait_ts_running() {
 }
 
 dockhand_probe() {   # dockhand_probe OUTFILE -> HTTP code (000 if down)
-  curl -s -o "$1" -w '%{http_code}' "$DOCKHAND_URL/api/secret-providers" 2>/dev/null || true
+  curl --noproxy '*' -s -o "$1" -w '%{http_code}' "$DOCKHAND_URL/api/secret-providers" 2>/dev/null || true
 }
 
 # --- preflight (step 0) ---------------------------------------------------------
@@ -339,6 +363,8 @@ preflight() {
   # Information only: Rock verifies HEAD with the OS's git BEFORE running.
   log 0-preflight "repo HEAD (info only): $(git -C "$REPO" log -1 --format='%H %cd %s')"
   [ -f "$BWS" ] && [ -x "$BWS" ] || die "$BWS missing (install bws first, host/README.md)"
+  root_owned_not_writable "$(stat -L -c '%u %a' "$BWS")" \
+    || die "$BWS must be owned by root and not group/world-writable"
   bws_pin_ok "$BWS_BIN_SHA256" \
     || die "bws binary hash not pinned yet (BWS_BIN_SHA256 is TBD) or it does not match $BWS"
   [ "$("$BWS" --version)" = "$BWS_VERSION" ] || die "bws version is not $BWS_VERSION"
@@ -355,6 +381,7 @@ need_secrets() {
   IFS= read -rs -p 'bws access token (input hidden): ' BWS_TOKEN < /dev/tty
   echo > /dev/tty
   [ -n "$BWS_TOKEN" ] || die "empty token"
+  TOKEN_ENTERED=1
   if ! BWS_ACCESS_TOKEN=$BWS_TOKEN BWS_CONFIG_FILE=$RUNDIR/bws.toml \
       "$BWS" -p default run --no-inherit-env --shell /bin/sh -- "/bin/bash -p $REPO/host/bootstrap.sh --stage-secrets $RUNDIR"; then
     unset -v BWS_TOKEN
@@ -497,7 +524,7 @@ step_nfs() {
 done_tailscale() { [ -s "$TS_STATE" ] && ts_running; }
 step_tailscale() {
   STEP=7-tailscale
-  local compose=$REPO/compose/infrastructure/tailscale/compose.yaml cfg cenv mounts n routes
+  local compose=$REPO/compose/infrastructure/tailscale/compose.yaml cfg cenv mounts routes
   routes=$(<"$RUNDIR/TS_ROUTES")
   render_ts_override "$RUNDIR" > "$RUNDIR/ts-override.yaml"
   # Fail closed unless Compose resolves TS_AUTHKEY to the file path.
@@ -508,6 +535,8 @@ step_tailscale() {
   TS_ROUTES=$routes TS_AUTHKEY='' docker compose -p tailscale -f "$compose" \
     -f "$RUNDIR/ts-override.yaml" up -d >/dev/null
   wait_ts_running || die "tailscale did not reach Running within 120 s"
+  # Check the first container's log now: the recreate below replaces it.
+  ts_logs_clean || die "docker logs tailscale contain 'tskey-' before the recreate: rotate the key"
   # Recreate without the override: the node logs in from its state file.
   TS_ROUTES=$routes TS_AUTHKEY='' docker compose -p tailscale -f "$compose" \
     up -d --force-recreate >/dev/null
@@ -518,8 +547,7 @@ step_tailscale() {
   fi
   mounts=$(docker inspect -f '{{range .Mounts}}{{println .Source}}{{end}}' tailscale)
   if [[ $mounts == *"/run/homelab-bootstrap"* ]]; then die "container still mounts the tmpfs directory"; fi
-  n=$(docker logs tailscale 2>&1 | grep -c 'tskey-' || true)
-  [ "$n" = 0 ] || die "docker logs tailscale contain 'tskey-' ($n lines): rotate the key"
+  ts_logs_clean || die "docker logs tailscale contain 'tskey-' after the recreate: rotate the key"
   log 7-tailscale ok
 }
 
@@ -561,7 +589,7 @@ step_dockhand() {
     create)
       render_provider_json "$RUNDIR/DOCKHAND_BWS_ACCESS_TOKEN" "$DOCKHAND_SERVER_URL" > "$RUNDIR/provider.json" \
         || die "could not build the provider request"
-      curl -fsS -o /dev/null -H 'Content-Type: application/json' \
+      curl --noproxy '*' -fsS -o /dev/null -H 'Content-Type: application/json' \
         --data-binary @"$RUNDIR/provider.json" "$DOCKHAND_URL/api/secret-providers" \
         || die "creating the Bitwarden provider failed"
       rm -f -- "$RUNDIR/provider.json"
@@ -579,10 +607,6 @@ Next (infrastructure):
   2. sudo /srv/homelab/docker-gitops/host/bootstrap.sh --unlock-dockhand
 MSG
   fi
-  cat >&2 <<'MSG'
-
-Revoke the bootstrap access token now (Bitwarden > Machine accounts > bootstrap-<node> > Access tokens).
-MSG
 }
 
 # --- modes --------------------------------------------------------------------------
