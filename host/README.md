@@ -49,11 +49,13 @@ sha256sum /usr/local/bin/bws
 bws --version            # expect: bws 2.1.0
 ```
 
-**`BWS_BIN_SHA256` in `bootstrap.sh` is still TBD.** Bitwarden publishes
-digests for the zip only. Record the `sha256sum /usr/local/bin/bws` output on
-the first node, check the second node prints the same value, and put it in
-`bootstrap.sh` through a reviewed PR. Until then, `bootstrap.sh` stops in
-preflight (fails closed).
+**`BWS_BIN_SHA256` in `bootstrap.sh` is pinned to Rock's installed bws
+2.1.0.** Bitwarden publishes digests for the zip only, so the pin is the
+`sha256sum /usr/local/bin/bws` of that verified install. On each node, check
+that `sha256sum /usr/local/bin/bws` prints exactly the `BWS_BIN_SHA256` value
+before the first run. If it differs, stop: `bootstrap.sh` refuses to run in
+preflight (fails closed), and a different bws build needs a new pin through a
+reviewed PR.
 
 ## Before every run: check the clone with the OS's git
 

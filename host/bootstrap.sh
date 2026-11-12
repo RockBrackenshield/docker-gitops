@@ -366,7 +366,7 @@ preflight() {
   root_owned_not_writable "$(stat -L -c '%u %a' "$BWS")" \
     || die "$BWS must be owned by root and not group/world-writable"
   bws_pin_ok "$BWS_BIN_SHA256" \
-    || die "bws binary hash not pinned yet (BWS_BIN_SHA256 is TBD) or it does not match $BWS"
+    || die "sha256 of $BWS does not match BWS_BIN_SHA256 (pinned bws 2.1.0, host/README.md)"
   [ "$("$BWS" --version)" = "$BWS_VERSION" ] || die "bws version is not $BWS_VERSION"
   log 0-preflight ok
 }
