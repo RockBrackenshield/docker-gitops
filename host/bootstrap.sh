@@ -9,7 +9,8 @@
 #
 # Flags: none for the normal run; --unlock-dockhand (infrastructure, after
 # Dockhand authentication is on); --restore-prep is reserved for the
-# restore-runbook PR; --stage-secrets <dir> is internal (only inside bws run).
+# restore-runbook PR; --stage-secrets <dir> is internal (only inside bws run,
+# as `/bin/bash -p`, which ignores BASH_ENV and functions in the environment).
 #
 # The bws access token is read once from /dev/tty, never from argv, a file or
 # the environment, is passed only to the one bws process, and is unset right
@@ -21,6 +22,10 @@ set -euo pipefail
 shopt -s inherit_errexit
 refuse_xtrace() { case $- in *x*) echo "refusing to run with xtrace" >&2; exit 1 ;; esac; }
 refuse_xtrace
+# Fixed PATH in every mode: in --stage-secrets the environment comes from bws,
+# where a secret named PATH would replace it (child_env_ok rejects that too).
+SAFE_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH=$SAFE_PATH
 umask 077
 ulimit -c 0                # no core dumps holding the token
 
@@ -100,6 +105,29 @@ check_names() {
   fi
   if [ "${#got[@]}" -gt 0 ]; then
     echo "unexpected secret names (machine account reads too much): ${!got[*]}" >&2; return 1
+  fi
+}
+
+# child_env_ok ENVIRON SAFE_PATH: the --stage-secrets child's own starting
+# environment (NUL-separated, /proc/$$/environ) must not hold names that bash
+# acts on: no BASH* name (BASH_ENV, BASH_FUNC_*%%, BASHOPTS, ...) and no PATH
+# other than the one this script exported to bws (a secret named PATH would
+# replace it). Reads the raw environment, so names that are not valid shell
+# identifiers are seen too. Prints names only, never values.
+child_env_ok() {
+  local file=$1 safe=$2 e n bad=()
+  local -a envs=()
+  [ -r "$file" ] || { echo "cannot read the child environment" >&2; return 1; }
+  mapfile -d '' -t envs < "$file"
+  for e in "${envs[@]}"; do
+    n=${e%%=*}
+    case $n in
+      PATH) [ "${e#PATH=}" = "$safe" ] || bad+=(PATH) ;;
+      BASH*) bad+=("$n") ;;
+    esac
+  done
+  if [ "${#bad[@]}" -gt 0 ]; then
+    echo "refusing secret names that bash would act on: ${bad[*]}" >&2; return 1
   fi
 }
 
@@ -297,7 +325,7 @@ need_secrets() {
   echo > /dev/tty
   [ -n "$BWS_TOKEN" ] || die "empty token"
   if ! BWS_ACCESS_TOKEN=$BWS_TOKEN BWS_CONFIG_FILE=$RUNDIR/bws.toml \
-      "$BWS" -p default run --no-inherit-env -- "$REPO/host/bootstrap.sh --stage-secrets $RUNDIR"; then
+      "$BWS" -p default run --no-inherit-env --shell /bin/sh -- "/bin/bash -p $REPO/host/bootstrap.sh --stage-secrets $RUNDIR"; then
     unset -v BWS_TOKEN
     die "bws login or secret staging failed (nothing that needs secrets was changed)"
   fi
@@ -604,6 +632,9 @@ main() {
     --restore-prep)
       echo "--restore-prep is reserved for the restore-runbook PR" >&2; exit 2 ;;
     --stage-secrets)
+      # Names first, before any value is read or written.
+      child_env_ok "/proc/$$/environ" "$SAFE_PATH" || die "unsafe secret names in the bootstrap project"
+      case $- in *p*) ;; *) die "--stage-secrets must run as /bin/bash -p" ;; esac
       [ $# -eq 2 ] || die "--stage-secrets needs a directory"
       [[ $2 =~ ^/run/homelab-bootstrap\.[A-Za-z0-9]{6}$ ]] || die "bad staging directory"
       [ "$EUID" -eq 0 ] && [ "$(stat -c '%u %a' "$2")" = '0 700' ] || die "staging directory must be root 0700"
