@@ -32,7 +32,7 @@ Current stacks:
 
 | Node | Stacks |
 |---|---|
-| `infrastructure` | `adguard`, `backrest`, `dockhand`, `tailscale`, `zoraxy` |
+| `infrastructure` | `adguard`, `backrest`, `dockhand`, `ntfy`, `tailscale`, `zoraxy` |
 | `core` | `backrest`, `flaresolverr`, `paperless`, `romm`, `shelfmark` |
 
 Other files:

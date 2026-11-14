@@ -12,9 +12,22 @@ services:
       - XDG_CACHE_HOME=/cache
       - TMPDIR=/tmp
       - TZ=America/Detroit
+      # ntfy failure alerts (Command hook, set in the Backrest UI). Non-secret values only;
+      # the token is the Compose secret below, never an env var.
+      - NTFY_URL=${NTFY_BASE_URL}            # https URL Zoraxy serves for ntfy
+      - NTFY_BACKREST_TOPIC=homelab-backrest
+      - NTFY_BACKREST_NODE=infrastructure
+    secrets:
+      - ntfy_backrest_token                 # read-only at /run/secrets/ntfy_backrest_token
     volumes:
       - /srv/homelab/backrest/data:/data
       - /srv/homelab/backrest/config:/config
       - /srv/backrest/cache:/cache
       - /srv/backrest/tmp:/tmp
       - /srv/homelab:/srv/homelab:ro
+
+secrets:
+  ntfy_backrest_token:
+    # Host file, root:root 0600, created by hand from Bitwarden (infrastructure/README.md).
+    # Outside /srv/homelab, so Backrest doesn't snapshot it. Never in Git.
+    file: /srv/backrest/secrets/ntfy-token
