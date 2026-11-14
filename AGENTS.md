@@ -32,7 +32,7 @@ Current stacks:
 
 | Node | Stacks |
 |---|---|
-| `infrastructure` | `adguard`, `backrest`, `dockhand`, `tailscale`, `zoraxy` |
+| `infrastructure` | `adguard`, `backrest`, `dockhand`, `ntfy`, `tailscale`, `zoraxy` |
 | `core` | `backrest`, `flaresolverr`, `paperless`, `romm`, `shelfmark` |
 
 Other files:
@@ -52,8 +52,8 @@ Other files:
 
 ## Images
 
-- Every image is pinned as `tag@sha256:<digest>`. Some older stacks still use
-  plain tags; Renovate's digest-pinning PRs bring them in line.
+- Every image is pinned as `tag@sha256:<digest>`, and CI enforces it. Keep
+  the digest when you add or change an image.
 - Renovate owns version bumps. Don't change image versions by hand in
   unrelated changes.
 
@@ -61,9 +61,18 @@ Other files:
 
 `compose-validate` runs on every pull request and on pushes to `main`:
 
-- `docker compose -f <file> config --quiet` for every `compose/**/compose.yaml`.
-- The job fails if any file fails to parse or validate.
-- Unset `${VAR}`s are warnings only: CI never has the real secrets.
+- `docker compose --env-file .github/ci.env -f <file> config --quiet` for every
+  `compose/**/compose.yaml`.
+- `.github/ci.env` holds CI-only placeholders: RFC 5737 TEST-NET addresses
+  (192.0.2.x, 198.51.100.x, 203.0.113.x) or obvious dummies, for variables
+  that must be set for `config` to pass. It is never a `.env`, never deployed,
+  and never holds real values.
+- "Check images are digest-pinned" renders each file with
+  `config --format json` and fails if any service's `image` isn't
+  `<ref>@sha256:<64 hex>`. A `build:`-only service fails too.
+- The job fails if any file fails to parse or validate, or has an unpinned
+  image. All files are checked before it fails.
+- Other unset `${VAR}`s are warnings only: CI never has the real secrets.
 
 It does not pull images, start containers, check host paths, or check that
 external Docker networks exist.

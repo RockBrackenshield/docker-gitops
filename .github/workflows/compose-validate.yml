@@ -52,3 +52,43 @@ jobs:
             fi
           done
           exit "$fail"
+
+      - name: Check images are digest-pinned
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq --version
+          shopt -s globstar nullglob
+          files=(compose/**/compose.yaml)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no compose/**/compose.yaml files found"
+            exit 1
+          fi
+          # Every rendered service must have image: <ref>@sha256:<64 hex>.
+          # A build:-only service renders with no image, so it fails too.
+          # Rendering drops commented-out lines, so those are ignored.
+          fail=0
+          for f in "${files[@]}"; do
+            if ! json="$(docker compose --env-file .github/ci.env -f "$f" config --format json)"; then
+              echo "::error file=$f::docker compose config --format json failed"
+              fail=1
+              continue
+            fi
+            if ! bad="$(jq -r '
+                (.services // {}) | to_entries[]
+                | select((.value.image // "") | test("^[^@]+@sha256:[0-9a-f]{64}$") | not)
+                | .key' <<<"$json")"; then
+              echo "::error file=$f::jq could not read the rendered config"
+              fail=1
+              continue
+            fi
+            if [ -n "$bad" ]; then
+              while IFS= read -r svc; do
+                echo "::error file=$f::service $svc image not digest-pinned"
+              done <<<"$bad"
+              fail=1
+            else
+              echo "OK   $f"
+            fi
+          done
+          exit "$fail"
