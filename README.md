@@ -6,7 +6,7 @@ I started out on Docker, but then moved over to K3s once I found out that, with 
 
 I spent several weeks/months learning K3s, getting a number of utilities set up, but... it was a pain. I loved learning it, I was going into it with possibly using it to look for an SRE or platform engineer job, and orchestration is really useful, but man alive is it overkill for the little homelab I have now. If I had a full rack with server after server, sure, some flavour of Kubernetes would probably be useful, but a couple Pis, its just so much overhead and work to keep it going and I was frequently battling with ArgoCD which was.. whew, those were fights to try to get things resolved. 
 
-So, my day-to-day services run on Docker, while K3s carries on as a Talos lab on the Pi 5 (that lives in my k3s-gitops repo). This repository will take what I've learned from both my previous Docker run and now the past Kuberneted run and try to make a nice, effective homelab. That doesn't need tinkering all the time and preferably does not require 20-30 minutes to boot up every time the power flickers (thank you power company).
+So, my day-to-day services run on Docker, while K3s carries on as a Talos lab on the Pi 5 (that lives in my k3s-gitops repo). This repository will take what I've learned from both my previous Docker run and now the past Kubernetes run and try to make a nice, effective homelab. That doesn't need tinkering all the time and preferably does not require 20-30 minutes to boot up every time the power flickers (thank you power company).
 
 Enjoy!
 
@@ -52,7 +52,7 @@ Two Raspberry Pi 4Bs, each running Docker:
 
 ## AI
 
-I know it basically makes me a demon to many, but I did and do use AI as part of helping to manage the lab. This README is hand-written by a not-grass-fed, partially-organically raised, cubically-caged human, but much of the rest has been at least advised on by AI, with much of the overall documentation and layout (architecturally) recommended by ChatGPT, whereas Claude handled a lot of the lifting in terms of the compose stacks, and conversion of existing K3s manifests into a relatively comparable Compose file/stack. I do still review it all, clear out some detritus, but life is busy, and asking the robots to do grunt work is nice. 
+I know it basically makes me a demon to many, but I did and do use AI as part of helping to manage the lab. This README is hand-written by a not-grass-fed, partially-organically raised, cubically-caged human, but much of the rest has been at least advised on by AI, with much of the overall documentation and layout (architecturally) recommended by Grok Bots which also did a lot of the lifting in terms of the compose stacks, and conversion of existing K3s manifests into a relatively comparable Compose file/stack, and integration of new services that require more than a single Compose file. I do still review it all, clear out some detritus, but life is busy, and asking the robots to do grunt work is nice. 
 
 ---
 
