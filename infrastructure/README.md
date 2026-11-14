@@ -37,14 +37,11 @@ That responsibility belongs to `/compose`.
 
 The intended structure is below. Today only `README.md` exists; the rest is added when there is something real to document.
 
+Host setup that runs on the nodes (cloud-init, `bootstrap.sh`, the host firewall) lives in the top-level [`host/`](../host/README.md) directory, not under `infrastructure/`, so the nodes run it straight from their clone at `/srv/homelab/docker-gitops/host/`.
+
 ```text
 infrastructure/
 ├── README.md
-│
-├── host/
-│   ├── mounts/
-│   ├── packages/
-│   └── firewall/
 │
 ├── networking/
 │   ├── dns/
@@ -356,18 +353,9 @@ Avoid creating an additional abstraction layer solely to allow infrastructure YA
 
 # Host
 
-The `host/` directory contains configuration required by the underlying operating system.
+The top-level [`host/`](../host/README.md) directory contains configuration required by the underlying operating system: the cloud-init `user-data` per node, `bootstrap.sh`, and the host firewall (`host/firewall/`). See [Rebuilding a node](#rebuilding-a-node).
 
-Potential responsibilities include:
-
-```text
-host/
-├── mounts/
-├── packages/
-└── firewall/
-```
-
-Examples:
+Other host concerns that may be documented there later:
 
 ### `host/mounts/`
 
@@ -501,7 +489,7 @@ sudo ip6tables -A INPUT -p tcp --dport 2049 -j DROP   # unless the laptop uses I
 ```
 
 - `--ctdir ORIGINAL` keeps the replies to allowed clients from being dropped.
-- Make the rules persistent on Raspberry Pi OS, for example with a small systemd unit ordered `After=docker.service` that re-inserts them at boot. Docker creates `DOCKER-USER` but leaves its contents alone.
+- `host/firewall/` applies these rules and keeps them across reboots (see [`host/README.md`](../host/README.md#firewall)): an early unit loads raw `PREROUTING` rules for 8000 and 445 and the `INPUT` rule for 2049 **before** Docker starts and fails closed (`RequiredBy=docker.service`), and a second unit adds the `DOCKER-USER` layer above after Docker starts. Both cover IPv6. The commands above show what the rules do; don't also add them by hand.
 - On the router: UPnP **off**, and **no port forwards** for 445, 8000 or 2049.
 
 ## 5. Tailnet access
@@ -661,7 +649,7 @@ docker network inspect <that-network> --format '{{(index .IPAM.Config 0).Subnet}
 
 Use that subnet. Every other container on that Docker network can also get through, so keep it to containers that need it.
 
-- **Persistence:** a small systemd unit ordered `After=docker.service network-online.target` that inserts both rules only if they're missing (`iptables -C … || iptables -I …`). Neither Docker nor Tailscale flushes `raw PREROUTING`, so a Tailscale restart doesn't undo the primary rule. If the unit fails at boot, port 2586 is open to the LAN and tailnet until it's fixed, so check it after every reboot.
+- **Persistence:** `host/firewall/` applies these rules and keeps them across reboots (see [`host/README.md`](../host/README.md#firewall)): an early unit loads the raw `PREROUTING` rule for 2586 **before** Docker starts and fails closed (`RequiredBy=docker.service`), and a second unit adds the `DOCKER-USER` layer after Docker starts. Both cover IPv6. Neither Docker nor Tailscale flushes `raw PREROUTING`, so a Tailscale restart doesn't undo the primary rule. If the early unit fails at boot, Docker (and so ntfy) doesn't start, so port 2586 isn't published until it's fixed over SSH; check `systemctl status homelab-firewall-early` after every reboot. The commands above show what the rules do; don't also add them by hand.
 - **Checks:** `sudo iptables -t raw -S PREROUTING` shows the rule; `sudo iptables -S FORWARD | head -5` shows the current jump order (informational only). `http://<infra-lan-ip>:2586` must **time out** from a tailnet device and from a LAN host, including after `docker restart tailscale`.
 - **IPv6:** `host_ip` is an IPv4 address, so nothing is published on IPv6.
 - **nftables mode:** if Tailscale runs in nftables mode (`TS_DEBUG_FIREWALL_MODE`), the `raw PREROUTING` rule (priority −300) still runs before any forward hook.
@@ -844,6 +832,25 @@ All clients use the admin account, with one 365-day token per device (section 6)
 
 ---
 
+# Rebuilding a node
+
+The files are in [`host/`](../host/README.md); its README has the details for each step. Values in `<angle brackets>` are placeholders.
+
+1. **Before.** Confirm the node's latest Backrest snapshot. In Bitwarden, create a new access token with a **1-day expiry** on the node's machine account (`bootstrap-infrastructure` or `bootstrap-core`). For infrastructure, make sure `TS_AUTHKEY_INFRASTRUCTURE` in `bootstrap-infrastructure` holds the Tailscale auth key you use today, and remove the old machine from the Tailscale admin console.
+2. **Flash.** Raspberry Pi Imager **2.x**, Raspberry Pi OS Lite (64-bit), Trixie. Replace `user-data` on the boot partition with your filled-in copy of `host/<node>/user-data` (username and normal SSH public key only). No password and no Wi-Fi PSK in `user-data` or `network-config`. Never commit the filled-in copy.
+3. **First boot.** `cloud-init status --wait`, then set the sudo password and remove `NOPASSWD` ([`host/README.md`](../host/README.md#sudo-after-first-boot)). Optional: `sudo touch /etc/cloud/cloud-init.disabled`.
+4. **Install bws** 2.1.0 and check its hash ([`host/README.md`](../host/README.md#install-bws-210-both-nodes-before-bootstrap)).
+5. **Restore** from Backrest if needed (restore runbook, separate).
+6. **Check the clone with the OS's git**, then run `sudo /srv/homelab/docker-gitops/host/bootstrap.sh` on the node, or `ssh -t <admin-user>@<node> 'sudo /srv/homelab/docker-gitops/host/bootstrap.sh'`.
+7. **Revoke the bootstrap access token** right after the run.
+8. **Dockhand takes over** (infrastructure). Tunnel to the UI (`ssh -L 3000:127.0.0.1:3000 <admin-user>@infrastructure`), turn on authentication, run `bootstrap.sh --unlock-dockhand`, bind each stack to its Bitwarden project, and deploy in order: AdGuard, Zoraxy, Tailscale (`docker compose -p tailscale down` first, then deploy it from Dockhand), ntfy, Backrest. Core's stacks follow through Hawser once its separate review is done.
+9. **Manual steps that stay manual:** the printer (section 7 above), the tailnet policy (section 5), Zoraxy rules and access lists, ntfy users and device tokens, Backrest's ntfy token file, hooks and plans, Paperless first-start cleanup (section 9).
+10. **Verify** with the checklist in [`host/README.md`](../host/README.md#verify).
+
+Accepted risk (Rock, Nov 11, 2026: "No, keep the Tailscale setup as it is" and "Leave TS_AUTHKEY in Dockhand's Bitwarden project as it is"): once Dockhand deploys the tailscale stack, its auth key is reused on every container start, is visible in `docker inspect` and the container's command line, and, if untagged, the node's key expires after 180 days unless key expiry is turned off for that machine in the Tailscale admin console.
+
+---
+
 # Infrastructure vs. Configuration
 
 Some files can initially appear ambiguous.
@@ -971,7 +978,7 @@ Documentation should eventually evolve into automation for important host config
 A future rebuild should ideally look roughly like:
 
 ```text
-Install Fedora
+Install Raspberry Pi OS
     ↓
 Apply host infrastructure
     ↓
@@ -986,7 +993,7 @@ Deploy the node's stacks from this repository
 Restore persistent data with Backrest if necessary
 ```
 
-The repository does not need to implement all of this immediately. The directory structure simply provides a place for those pieces to evolve.
+The repository does not need to implement all of this immediately. The directory structure simply provides a place for those pieces to evolve. The first pieces exist now: see [Rebuilding a node](#rebuilding-a-node).
 
 ---
 

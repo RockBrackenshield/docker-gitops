@@ -1,0 +1,107 @@
+#cloud-config
+# cloud-init user-data for the infrastructure node (Raspberry Pi OS Lite 64-bit, Trixie).
+# Copy this file over `user-data` on the boot partition written by Raspberry
+# Pi Imager 2.x, after filling in the two placeholders in YOUR LOCAL COPY:
+#   <admin-user>      your login name
+#   <ssh-public-key>  your normal SSH public key (for example ssh-ed25519 ...)
+# Never commit a filled-in copy. Never add a password, `passwd`,
+# `plain_text_passwd` or a Wi-Fi PSK here or in `network-config`.
+# After first boot, set a sudo password and remove NOPASSWD (host/README.md).
+hostname: infrastructure
+manage_etc_hosts: true
+timezone: America/Detroit
+locale: en_US.UTF-8
+enable_ssh: true            # Raspberry Pi OS cloud-init extension
+ssh_pwauth: false
+disable_root: true
+users:
+  - name: <admin-user>
+    groups: [sudo, adm]
+    shell: /bin/bash
+    lock_passwd: true       # no password in user-data, ever
+    sudo: "ALL=(ALL) NOPASSWD:ALL"   # first boot only; host/README.md replaces it
+    ssh_authorized_keys:
+      - <ssh-public-key>
+package_update: true
+package_upgrade: true
+packages: [git, curl, ca-certificates, gnupg, unzip, iptables]
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-homelab.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+      AllowUsers <admin-user>
+      AuthenticationMethods publickey
+      AllowAgentForwarding no
+      X11Forwarding no
+      AllowTcpForwarding local
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {"log-driver": "json-file", "log-opts": {"max-size": "10m", "max-file": "3"}}
+runcmd:
+  # Docker Engine + Compose plugin from Docker's Debian arm64 repo, with the
+  # signing key's fingerprint checked before it is trusted.
+  - - bash
+    - -c
+    - |
+      set -euo pipefail
+      [ "$(dpkg --print-architecture)" = arm64 ] || { echo "not arm64" >&2; exit 1; }
+      want=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+      if [ ! -s /etc/apt/keyrings/docker.asc ]; then
+        tmp=$(mktemp); gnupghome=$(mktemp -d)
+        curl -fsSL --proto '=https' --tlsv1.2 https://download.docker.com/linux/debian/gpg -o "$tmp"
+        n=$(GNUPGHOME=$gnupghome gpg --show-keys --with-colons "$tmp" | grep -c '^pub:')
+        got=$(GNUPGHOME=$gnupghome gpg --show-keys --with-colons "$tmp" | awk -F: '$1=="fpr"{print $10; exit}')
+        [ "$n" = 1 ] && [ "$got" = "$want" ] || { echo "Docker key fingerprint mismatch" >&2; exit 1; }
+        install -d -m 0755 /etc/apt/keyrings
+        install -m 0644 "$tmp" /etc/apt/keyrings/docker.asc
+        rm -rf "$tmp" "$gnupghome"
+      fi
+      . /etc/os-release
+      cat > /etc/apt/sources.list.d/docker.sources <<EOF
+      Types: deb
+      URIs: https://download.docker.com/linux/debian
+      Suites: ${VERSION_CODENAME}
+      Components: stable
+      Architectures: arm64
+      Signed-By: /etc/apt/keyrings/docker.asc
+      EOF
+      apt-get update
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      systemctl enable --now docker
+  # The public repo, root-owned and not group/world-writable (bootstrap.sh runs from it as root).
+  - - bash
+    - -c
+    - |
+      set -euo pipefail
+      if [ ! -d /srv/homelab/docker-gitops/.git ]; then
+        git clone --branch main --single-branch https://github.com/RockBrackenshield/docker-gitops.git /srv/homelab/docker-gitops
+      fi
+      chown -R root:root /srv/homelab/docker-gitops
+      chmod -R go-w /srv/homelab/docker-gitops
+  # Directories matching the compose bind mounts, so Docker never auto-creates them.
+  # /srv/homelab/ntfy is created by bootstrap.sh (owned by the ntfy system user).
+  - - bash
+    - -c
+    - |
+      set -euo pipefail
+      install -d -m 0755 /srv/homelab/adguard/adguard-conf /srv/homelab/adguard/adguard-work \
+        /srv/homelab/backrest/data /srv/homelab/backrest/config /srv/homelab/dockhand/data \
+        /srv/homelab/tailscale/state /srv/homelab/zoraxy/config /srv/homelab/zoraxy/plugin \
+        /srv/backrest/cache /srv/backrest/tmp
+      install -d -m 0700 /srv/backrest/secrets
+  # AdGuard binds :53: turn off systemd-resolved's stub listener if resolved is active.
+  - - bash
+    - -c
+    - |
+      set -euo pipefail
+      if systemctl is-active --quiet systemd-resolved; then
+        install -d -m 0755 /etc/systemd/resolved.conf.d
+        printf '[Resolve]\nDNSStubListener=no\n' > /etc/systemd/resolved.conf.d/10-no-stub.conf
+        ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+        systemctl restart systemd-resolved
+      fi
+  - [systemctl, restart, ssh]
