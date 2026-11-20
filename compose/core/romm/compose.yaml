@@ -28,7 +28,7 @@ services:
         restart: true
 
   romm-db:
-    image: mariadb:12.3.3-noble@sha256:ae84e923082a85464bdec854d2bf1a49cbe5b688d3ce82980568ffde4495c38c
+    image: mariadb:12.3.3-noble@sha256:fbd329877bb66fe9471ae15e97942b6c7a763fbd9b02fcb9fa4deaf703ba16b9
     container_name: romm-db
     restart: unless-stopped
     environment:
@@ -48,7 +48,7 @@ services:
 
   romm-db-backup:
     # Same pinned image/tag as romm-db so mariadb-dump matches the server version exactly.
-    image: mariadb:12.3.3-noble@sha256:ae84e923082a85464bdec854d2bf1a49cbe5b688d3ce82980568ffde4495c38c
+    image: mariadb:12.3.3-noble@sha256:fbd329877bb66fe9471ae15e97942b6c7a763fbd9b02fcb9fa4deaf703ba16b9
     container_name: romm-db-backup
     restart: unless-stopped
     environment:
