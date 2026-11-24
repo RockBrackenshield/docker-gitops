@@ -868,7 +868,7 @@ In the stack's settings:
 
 ## 5. Check the binding after every deploy
 
-An unbound stack deploys the raw `ENC[…]` strings with only a log warning. After each deploy of the tailscale stack:
+An unbound stack deploys the raw `ENC[…]` strings with only a log warning. `${VAR:?}` doesn't catch that: an `ENC[…]` string isn't empty. The same would happen in the unlikely case that a best-effort Restart/Recreate fails to decrypt locally while the encrypted file is the env file Compose reads. After each deploy (and any Recreate) of the tailscale stack:
 
 - `docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' tailscale | grep -c 'ENC\[AES256_GCM'` prints `0` (a count only, never values).
 - The deploy log shows `SOPS (age) decrypted 2 secret(s) from the env file`, and not `The env file is SOPS-encrypted but no SOPS secret provider is bound to this stack`.

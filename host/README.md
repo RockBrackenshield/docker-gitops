@@ -191,6 +191,23 @@ sudo stat -c '%U %a' /srv/homelab/dockhand/data   # expect: root 700
 If Dockhand runs as another UID (a `PUID` setting), keep that owner and still
 use `0700`. New nodes get `0700 root:root` from `user-data`.
 
+Two different keys are involved; don't mix them up:
+
+- **The age identity** (`AGE-SECRET-KEY-…`) decrypts `secrets.sops.env`. It's
+  pasted into the SOPS (age) provider and stored in Dockhand's database.
+- **Dockhand's own encryption key** wraps every secret in that database,
+  including the age identity. By default it's the file
+  `/srv/homelab/dockhand/data/.encryption_key` (`0600`, created on first
+  start). If the container is given an `ENCRYPTION_KEY` environment variable
+  instead, Dockhand uses that, deletes the file and keeps the key only in
+  memory (Dockhand v1.0.58 `src/lib/server/encryption.ts`, lines 49-60 and
+  150-156). This repo's Dockhand stack sets no `ENCRYPTION_KEY`, so the file is
+  used: that's why the data directory is `0700` and excluded from Backrest.
+  Switching to `ENCRYPTION_KEY` would take the key out of data-directory
+  backups, but it then shows in `docker inspect` and has to come from a
+  root-only host file at every start. Decide it on purpose; it isn't changed
+  here.
+
 Backrest mounts all of `/srv/homelab` read-only, so in the infrastructure
 node's Backrest plan UI **exclude `/srv/homelab/dockhand/data`**, then check
 that a snapshot's file listing shows no `dockhand/data`. Backrest's repository
@@ -201,11 +218,14 @@ carry the key with it.
 
 - New value (for example a new auth key): change it in Bitwarden first, then
   `sops edit compose/infrastructure/tailscale/secrets.sops.env` from the repo
-  root, commit through a pull request, and Deploy (online).
+  root, and also `sops rotate -i <file>` so the file gets a new data key
+  (Malis S4). Commit through a pull request, and Deploy (online).
 - New recipient: update `.sops.yaml`, then `sops updatekeys <file>` and
   `sops rotate -i <file>` (new data key), commit, and paste the new Dockhand
   identity into the provider if it changed. Old commits stay readable to the
-  old keys.
+  old keys, so if a recipient is **removed** because it's no longer trusted,
+  rotate the secret values themselves too (a new Tailscale auth key):
+  re-keying alone doesn't take back what the old key can already read.
 
 **Recovery.**
 
