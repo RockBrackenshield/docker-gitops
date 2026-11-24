@@ -41,9 +41,6 @@ Other files:
 - `.github/workflows/compose-validate.yml`: CI (see below).
 - `renovate.json`: Renovate configuration (hosted Mend app).
 - `README.md`: overview.
-- `.sops.yaml`: SOPS creation rules (age recipients) for `secrets.sops.env`.
-- `scripts/check-sops-files.sh`: plaintext-secret guard (pre-commit hook and CI).
-- `.githooks/pre-commit`: runs the guard; enable with `git config core.hooksPath .githooks`.
 
 ## Secrets
 
@@ -59,6 +56,10 @@ Other files:
   Never create or edit ciphertext that holds real values: Rock does that on
   his workstation.
 - `scripts/check-sops-files.sh --all` must pass (CI runs it).
+- Secret-handling files:
+  - `.sops.yaml`: SOPS creation rules (age recipients) for `secrets.sops.env`.
+  - `scripts/check-sops-files.sh`: plaintext-secret guard (pre-commit hook and CI).
+  - `.githooks/pre-commit`: runs the guard; enable with `git config core.hooksPath .githooks`.
 
 ## Images
 
