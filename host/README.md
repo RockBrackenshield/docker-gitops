@@ -7,7 +7,7 @@ SD card, without Ansible: cloud-init for first boot, one re-runnable
 
 | File | What it is |
 |---|---|
-| `infrastructure/user-data`, `core/user-data` | cloud-init `#cloud-config` per node. Placeholders only: `<admin-user>`, `<ssh-public-key>`. |
+| `infrastructure/user-data`, `core/user-data` | cloud-init `#cloud-config` per node. Placeholders only: `<admin-user>`, `<ssh-public-key>`, and on infrastructure `<infra-lan-ip>` (DNS fallback, below). |
 | `bootstrap.sh` | Run once on the node after first boot; safe to re-run. Reads secrets with one `bws secret list -o env`, parsed against each node's name allowlist. |
 | `firewall/homelab-firewall.sh` | Validates `/etc/homelab/firewall.env` and applies the node's rules (`--early`, `--docker`, `--check`, `--remove`). |
 | `firewall/homelab-firewall-early.service` | Loads the raw/INPUT rules before the network, Docker and host NFS. `RequiredBy=docker.service nfs-server.service`, so it fails closed. |
@@ -142,6 +142,64 @@ to confirm the audit (exactly one user; no API tokens, OIDC providers or
 webhooks; no Hawser tokens yet, because core's agent token is created after the
 unlock), then switches the marker to `allowlist`: from then on only loopback
 and Zoraxy reach `:3000`, permanently. There is no "open" state.
+
+## DNS fallback (infrastructure)
+
+UniFi hands the infrastructure node its **own** address as DNS, so without a
+fallback the node's own lookups (git, Bitwarden, the Tailscale control plane)
+die with its AdGuard container. The node therefore asks its AdGuard first, then
+**Quad9**: `9.9.9.9` and `149.112.112.112`, Quad9's "Recommended" service
+(malware blocking, DNSSEC validation), from
+<https://quad9.net/service/service-addresses-and-features/>. Rock chose Quad9
+and approved hardcoding its public addresses as a one-off exception to the
+no-IPs rule (Nov 24, 2026: "Yes, hardcode Quad 9. I know it breaks the rule,
+but it's for a public, well-documented and known service, so I'm not
+concerned"). Every other address stays a placeholder.
+
+New nodes get it from `user-data` (fill in `<infra-lan-ip>` in your local
+copy). It fails loudly, and writes nothing, if the placeholder is left or if
+neither resolver stack is active. `FallbackDNS=` isn't used: it only applies
+when no other server is known, and DHCP always supplies one.
+
+**The already-provisioned node (by hand):**
+
+```bash
+systemctl is-active systemd-resolved NetworkManager    # which one is active?
+```
+
+- **systemd-resolved active:**
+
+  ```bash
+  printf '[Resolve]\nDNS=<infra-lan-ip> 9.9.9.9 149.112.112.112\n' \
+    | sudo tee /etc/systemd/resolved.conf.d/20-homelab-dns.conf
+  sudo systemctl restart systemd-resolved
+  resolvectl status
+  ```
+
+- **NetworkManager active (and resolved not):**
+
+  ```bash
+  printf '[global-dns]\noptions=timeout:2,attempts:2\n\n[global-dns-domain-*]\nservers=<infra-lan-ip>,9.9.9.9,149.112.112.112\n' \
+    | sudo tee /etc/NetworkManager/conf.d/20-homelab-dns.conf
+  sudo nmcli general reload
+  cat /etc/resolv.conf     # <infra-lan-ip> first, then the two Quad9 addresses
+  ```
+
+Use the node's LAN address, not `127.0.0.1`: Docker drops loopback
+nameservers when it builds container DNS from the host's `resolv.conf`, so a
+loopback entry could silently send containers straight to Quad9.
+
+**Check (on site, at a quiet time; LAN clients lose DNS for those seconds):**
+`docker stop adguard-home; getent ahosts github.com; docker start adguard-home`.
+The lookup still resolves.
+
+**Trade-offs.** While the node uses Quad9, its own lookups bypass AdGuard's
+filtering and internal rewrites (with systemd-resolved the servers are asked in
+parallel; with NetworkManager/glibc only after a timeout). LAN clients are
+unaffected: UniFi still hands them AdGuard.
+
+**Rollback.** Delete the `20-homelab-dns.conf` drop-in and restart
+systemd-resolved or `sudo nmcli general reload`.
 
 ## Firewall
 

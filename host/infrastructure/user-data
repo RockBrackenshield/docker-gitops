@@ -1,9 +1,10 @@
 #cloud-config
 # cloud-init user-data for the infrastructure node (Raspberry Pi OS Lite 64-bit, Trixie).
 # Copy this file over `user-data` on the boot partition written by Raspberry
-# Pi Imager 2.x, after filling in the two placeholders in YOUR LOCAL COPY:
+# Pi Imager 2.x, after filling in the three placeholders in YOUR LOCAL COPY:
 #   <admin-user>      your login name
 #   <ssh-public-key>  your normal SSH public key (for example ssh-ed25519 ...)
+#   <infra-lan-ip>    this node's LAN address (where AdGuard answers on :53)
 # Never commit a filled-in copy. Never add a password, `passwd`,
 # `plain_text_passwd` or a Wi-Fi PSK here or in `network-config`.
 # After first boot, set a sudo password and remove NOPASSWD (host/README.md).
@@ -103,5 +104,33 @@ runcmd:
         printf '[Resolve]\nDNSStubListener=no\n' > /etc/systemd/resolved.conf.d/10-no-stub.conf
         ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
         systemctl restart systemd-resolved
+      fi
+  # The node's own lookups: its AdGuard first, then Quad9, so git, Bitwarden and
+  # the Tailscale control plane still resolve when AdGuard is down (UniFi hands
+  # this node its own address as DNS). Quad9's addresses are hardcoded as a
+  # one-off exception to the repo's no-IPs rule (Rock, Nov 24, 2026); source:
+  # https://quad9.net/service/service-addresses-and-features/ ("Recommended").
+  # FallbackDNS= would never apply here (DHCP always supplies a server).
+  - - bash
+    - -c
+    - |
+      set -euo pipefail
+      adguard='<infra-lan-ip>'
+      case $adguard in
+        '<'*) echo "homelab-dns: <infra-lan-ip> not filled in; DNS fallback NOT configured" >&2; exit 1 ;;
+      esac
+      if systemctl is-active --quiet systemd-resolved; then
+        install -d -m 0755 /etc/systemd/resolved.conf.d
+        printf '[Resolve]\nDNS=%s 9.9.9.9 149.112.112.112\n' "$adguard" \
+          > /etc/systemd/resolved.conf.d/20-homelab-dns.conf
+        systemctl restart systemd-resolved
+      elif systemctl is-active --quiet NetworkManager; then
+        install -d -m 0755 /etc/NetworkManager/conf.d
+        printf '[global-dns]\noptions=timeout:2,attempts:2\n\n[global-dns-domain-*]\nservers=%s,9.9.9.9,149.112.112.112\n' "$adguard" \
+          > /etc/NetworkManager/conf.d/20-homelab-dns.conf
+        nmcli general reload
+      else
+        echo "homelab-dns: neither systemd-resolved nor NetworkManager is active; DNS fallback NOT configured" >&2
+        exit 1
       fi
   - [systemctl, restart, ssh]
