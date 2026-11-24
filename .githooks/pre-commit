@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Repo-shipped pre-commit hook. Enable once per clone:
+#   git config core.hooksPath .githooks
+# Plain shell; it downloads nothing and uses no pre-commit framework.
+set -euo pipefail
+root=$(git rev-parse --show-toplevel)
+
+# 1. SOPS / plaintext-secret guard on what is staged.
+bash "$root/scripts/check-sops-files.sh" --staged
+
+# 2. gitleaks on the staged changes, only if it is already installed
+#    (gitleaks >= 8.19 syntax). Never installed or fetched by this hook.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --pre-commit --redact --staged --no-banner
+else
+  echo "pre-commit: gitleaks not installed; skipped (scripts/check-sops-files.sh still ran)" >&2
+fi
