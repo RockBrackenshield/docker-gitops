@@ -329,7 +329,9 @@ The infrastructure node runs the LAN's DNS (AdGuard) and remote access (Tailscal
   ```
 
   and confirm it with Filters → "Check the filtering" for `healthcheck.home.arpa`. The rule lives in AdGuard's config on the host (backed up by Backrest), not in Git. Check: `docker inspect -f '{{.State.Health.Status}}' adguard-home` = `healthy`; a negative test, `docker exec adguard-home nslookup -timeout=2 healthcheck.home.arpa 192.0.2.1` (TEST-NET, unreachable), exits 1.
+- **Tailscale healthcheck:** containerboot's `/healthz` (`TS_ENABLE_HEALTH_CHECK=true`), bound to `TS_LOCAL_ADDR_PORT=127.0.0.1:9002`, polled with the image's busybox `wget`. It's healthy once the node has a tailnet IP. That address persists from state, so the check stays healthy through an internet outage and doesn't detect a control-plane outage. Check that `sudo ss -ltnp | grep ':9002 '` shows only `127.0.0.1:9002`, and that `<infra-lan-ip>:9002` is refused or times out from another LAN host.
 - Docker doesn't restart an unhealthy container; health is for visibility (Dockhand status), not self-healing.
+- Both containers come back on their own after a reboot (`restart: always`), in no guaranteed order. They stay separate stacks: `depends_on` wouldn't apply at reboot or daemon restart anyway, and making Tailscale wait for a healthy AdGuard would block remote access when AdGuard is broken.
 
 ---
 

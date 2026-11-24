@@ -15,3 +15,14 @@ services:
       - TS_STATE_DIR=/var/lib/tailscale
       - TS_ROUTES=${TS_ROUTES}          # comma-separated CIDRs, e.g. 192.0.2.0/24,198.51.100.0/24
       - TS_EXTRA_ARGS=--advertise-exit-node
+      # containerboot's /healthz (200 once the node has a tailnet IP, else 503).
+      # Loopback only: with network_mode: host the default [::]:9002 would listen
+      # on every interface, LAN and tailnet included.
+      - TS_ENABLE_HEALTH_CHECK=true
+      - TS_LOCAL_ADDR_PORT=127.0.0.1:9002
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9002/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
