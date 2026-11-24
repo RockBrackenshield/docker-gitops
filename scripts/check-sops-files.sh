@@ -9,8 +9,11 @@
 # For every *.sops.env it requires:
 #   - the path is in ALLOWED below (the stacks named in infrastructure/README.md,
 #     Guiding Principles section 5);
-#   - every non-empty line is a sops_* metadata line, KEY=ENC[AES256_GCM,...]
-#     or an encrypted comment #ENC[AES256_GCM,...];
+#   - every non-empty line is KEY=ENC[AES256_GCM,...], an encrypted comment
+#     #ENC[AES256_GCM,...], or one of the metadata lines sops writes for an
+#     age-only file (sops_version, sops_lastmodified, sops_mac,
+#     sops_unencrypted_suffix=_unencrypted, sops_age__list_N__map_recipient,
+#     sops_age__list_N__map_enc), each with a value of the expected shape;
 #   - a sops_mac=ENC[AES256_GCM,...] line;
 #   - no sops_unencrypted_*, sops_encrypted_* or sops_mac_only_encrypted key,
 #     except sops' own default sops_unencrypted_suffix=_unencrypted (every data
@@ -18,6 +21,8 @@
 #   - its age recipients are exactly the two age1... keys in .sops.yaml, and
 #     .sops.yaml has no <AGE_PUBKEY_...> placeholder left;
 #   - no "tskey-" and no "AGE-SECRET-KEY-" anywhere in it.
+# Any other file with "sops" in its name (secrets.sops.yaml, .env.sops,
+# secrets.sops.env.bak, ...) fails, except .sops.yaml and this script.
 # In every scanned file it rejects a Tailscale-key-shaped or age-private-key-
 # shaped string.
 set -uo pipefail
@@ -35,7 +40,13 @@ B64='[A-Za-z0-9+/=]'
 ENC_RE="ENC\\[AES256_GCM,data:${B64}*,iv:${B64}+,tag:${B64}+,type:[a-z]+\\]"
 DATA_LINE_RE="^[A-Za-z_][A-Za-z0-9_]*=${ENC_RE}\$"
 COMMENT_LINE_RE="^#${ENC_RE}\$"
-META_LINE_RE='^sops_[a-z0-9_]+='
+# Metadata keys sops writes for an age-only dotenv file: getsops/sops
+# stores/stores.go (metadata struct: lastmodified, mac, unencrypted_suffix,
+# version; agekey: recipient, enc; one key group is written as top-level age),
+# stores/metadata.go (SopsPrefix "sops_"), stores/flatten.go (__list_/__map_),
+# stores/dotenv/store.go (newlines in values written as a literal \n).
+AGE_ENC_RE='-----BEGIN AGE ENCRYPTED FILE-----(\\n[A-Za-z0-9+/=]*)*\\n-----END AGE ENCRYPTED FILE-----(\\n)?'
+META_LINE_RE="^(sops_version=[0-9][0-9A-Za-z.+-]*|sops_lastmodified=[0-9][0-9TZ:.+-]*|sops_mac=${ENC_RE}|sops_unencrypted_suffix=_unencrypted|sops_age__list_[0-9]+__map_recipient=age1[0-9a-z]+|sops_age__list_[0-9]+__map_enc=${AGE_ENC_RE})\$"
 
 usage() { echo "usage: $0 --staged | --all" >&2; exit 2; }
 [ "$#" -eq 1 ] || usage
@@ -85,7 +96,16 @@ for f in "${files[@]}"; do
 
   case "$f" in
     *.sops.env) sops_files+=("$f") ;;
-    *) continue ;;
+    *)
+      # Misnamed SOPS-looking files: "sops" anywhere in the file name.
+      base=${f##*/}
+      case "${base,,}" in
+        *sops*)
+          if [ "$f" != .sops.yaml ] && [ "$f" != scripts/check-sops-files.sh ]; then
+            err "$f: file name contains 'sops' but isn't an allowed SOPS file (only */secrets.sops.env at ALLOWED paths, and .sops.yaml)"
+          fi ;;
+      esac
+      continue ;;
   esac
 
   allowed=0
