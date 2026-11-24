@@ -143,6 +143,23 @@ webhooks; no Hawser tokens yet, because core's agent token is created after the
 unlock), then switches the marker to `allowlist`: from then on only loopback
 and Zoraxy reach `:3000`, permanently. There is no "open" state.
 
+## Firewall
+
+| Node | Port | Allowed from |
+|---|---|---|
+| infrastructure | 2586 (ntfy, LAN IP only) | Zoraxy |
+| infrastructure | 3000 (Dockhand) | loopback (lock), then loopback + Zoraxy (allowlist) |
+| infrastructure | 8000 (Zoraxy UI) | loopback only (`ssh -L`) |
+| infrastructure | 9898 (Backrest), 8102 (AdGuard admin) | loopback + Zoraxy |
+| core | 8000 (Paperless) | the infrastructure node (Zoraxy) |
+| core | 445 (Samba) | the printer |
+| core | 2049 (NFS) | the laptop |
+
+- Raw `PREROUTING` rules use `-m addrtype --dst-type LOCAL`, so they cover every address of the node and nothing the Tailscale subnet router forwards to other hosts. Each has an `ip6tables` twin; IPv6 sources are dropped unless an `*_IPV6` value is set (core only).
+- The `DOCKER-USER` layer (`HOMELAB-DOCKER` chain) matches only DNATed traffic to published ports.
+- A broken `firewall.env` fails the early unit, and Docker (including AdGuard DNS) stays down until it's fixed over SSH. Check a copy first with `sudo homelab-firewall.sh --check --env <file>`.
+- **Never `systemctl restart homelab-firewall-early`**: `Requires=` restarts Docker too. Re-apply with `sudo homelab-firewall.sh --early`.
+
 ## DNS fallback (infrastructure)
 
 UniFi hands the infrastructure node its **own** address as DNS, so without a
@@ -200,23 +217,6 @@ unaffected: UniFi still hands them AdGuard.
 
 **Rollback.** Delete the `20-homelab-dns.conf` drop-in and restart
 systemd-resolved or `sudo nmcli general reload`.
-
-## Firewall
-
-| Node | Port | Allowed from |
-|---|---|---|
-| infrastructure | 2586 (ntfy, LAN IP only) | Zoraxy |
-| infrastructure | 3000 (Dockhand) | loopback (lock), then loopback + Zoraxy (allowlist) |
-| infrastructure | 8000 (Zoraxy UI) | loopback only (`ssh -L`) |
-| infrastructure | 9898 (Backrest), 8102 (AdGuard admin) | loopback + Zoraxy |
-| core | 8000 (Paperless) | the infrastructure node (Zoraxy) |
-| core | 445 (Samba) | the printer |
-| core | 2049 (NFS) | the laptop |
-
-- Raw `PREROUTING` rules use `-m addrtype --dst-type LOCAL`, so they cover every address of the node and nothing the Tailscale subnet router forwards to other hosts. Each has an `ip6tables` twin; IPv6 sources are dropped unless an `*_IPV6` value is set (core only).
-- The `DOCKER-USER` layer (`HOMELAB-DOCKER` chain) matches only DNATed traffic to published ports.
-- A broken `firewall.env` fails the early unit, and Docker (including AdGuard DNS) stays down until it's fixed over SSH. Check a copy first with `sudo homelab-firewall.sh --check --env <file>`.
-- **Never `systemctl restart homelab-firewall-early`**: `Requires=` restarts Docker too. Re-apply with `sudo homelab-firewall.sh --early`.
 
 ## Verify
 
