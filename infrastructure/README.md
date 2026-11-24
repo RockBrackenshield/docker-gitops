@@ -317,6 +317,20 @@ The important distinction is:
 
 > **Compose manages Docker's network. Infrastructure manages the network Docker is connected to.**
 
+## DNS resilience on the infrastructure node
+
+The infrastructure node runs the LAN's DNS (AdGuard) and remote access (Tailscale), and UniFi hands the node its own address as DNS. So:
+
+- **Host DNS fallback:** the node's own lookups go to its AdGuard first, then Quad9 ([`host/README.md`](../host/README.md#dns-fallback-infrastructure)).
+- **AdGuard healthcheck:** a real DNS query to `127.0.0.1:53` with the image's busybox `nslookup`, answered by a local rewrite rule, so it doesn't go unhealthy just because the upstream internet is down. **Add the rule before deploying this healthcheck**, or AdGuard turns unhealthy: in AdGuard → Filters → Custom filtering rules, add
+
+  ```text
+  ||healthcheck.home.arpa^$dnsrewrite=NOERROR;A;127.0.0.1
+  ```
+
+  and confirm it with Filters → "Check the filtering" for `healthcheck.home.arpa`. The rule lives in AdGuard's config on the host (backed up by Backrest), not in Git. Check: `docker inspect -f '{{.State.Health.Status}}' adguard-home` = `healthy`; a negative test, `docker exec adguard-home nslookup -timeout=2 healthcheck.home.arpa 192.0.2.1` (TEST-NET, unreachable), exits 1.
+- Docker doesn't restart an unhealthy container; health is for visibility (Dockhand status), not self-healing.
+
 ---
 
 # External Docker Resources
