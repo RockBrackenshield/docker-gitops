@@ -1,0 +1,23 @@
+# SOPS creation rules, used by `sops` on Rock's workstation. Dockhand does not
+# read this file: it decrypts with the age identity pasted into its SOPS (age)
+# provider.
+#
+# Two recipients (Rock, Nov 20, 2026): Dockhand's identity and an offline
+# recovery identity that never lives on a node. Public keys only; age public
+# keys start with `age1` and are safe in a public repository.
+# TODO(Rock): replace both placeholders with the two age PUBLIC keys before the
+# first `secrets.sops.env` is committed. scripts/check-sops-files.sh fails while
+# a placeholder is left and any *.sops.env exists.
+#
+# Run sops from the repository root with the repo-relative path, for example
+#   sops edit compose/infrastructure/tailscale/secrets.sops.env
+# There is deliberately no catch-all rule: any other path fails with
+# "no matching creation rules". No unencrypted_*/encrypted_* keys, so every
+# value and comment is encrypted. Which stacks may carry a secrets.sops.env is
+# listed in infrastructure/README.md (Guiding Principles, section 5) and
+# enforced by scripts/check-sops-files.sh.
+creation_rules:
+  - path_regex: (^|/)compose/infrastructure/[^/]+/secrets\.sops\.env$
+    age: >-
+      <AGE_PUBKEY_DOCKHAND>,
+      <AGE_PUBKEY_OFFLINE_RECOVERY>
