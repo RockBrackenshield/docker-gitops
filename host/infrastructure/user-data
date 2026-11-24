@@ -89,10 +89,14 @@ runcmd:
     - |
       set -euo pipefail
       install -d -m 0755 /srv/homelab/adguard/adguard-conf /srv/homelab/adguard/adguard-work \
-        /srv/homelab/backrest/data /srv/homelab/backrest/config /srv/homelab/dockhand/data \
+        /srv/homelab/backrest/data /srv/homelab/backrest/config \
         /srv/homelab/tailscale/state /srv/homelab/zoraxy/config /srv/homelab/zoraxy/plugin \
         /srv/backrest/cache /srv/backrest/tmp
       install -d -m 0700 /srv/backrest/secrets
+      # Dockhand's data holds its encryption key and the SOPS age identity:
+      # root-only (Dockhand runs as root by default; see host/README.md).
+      install -d -m 0755 /srv/homelab/dockhand
+      install -d -m 0700 -o root -g root /srv/homelab/dockhand/data
   # AdGuard binds :53: turn off systemd-resolved's stub listener if resolved is active.
   - - bash
     - -c
