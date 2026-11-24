@@ -86,7 +86,7 @@ docker-gitops/
     └── Rules for agents working in the repository
 ```
 
-Secrets are not stored in the repository. Dockhand injects them at deploy time from Bitwarden Secrets Manager, and compose files reference them as `${VAR}`.
+Plaintext secrets are not stored in the repository. Dockhand injects them at deploy time from Bitwarden Secrets Manager, and compose files reference them as `${VAR}`. The one exception is SOPS/age-encrypted `secrets.sops.env` files for the outage-critical stacks named in [Guiding Principles §5](#5-secrets-bitwarden-is-the-source-of-truth-sops-ciphertext-for-named-stacks); Dockhand decrypts those locally.
 
 The dependency relationship is approximately:
 
@@ -955,11 +955,22 @@ Git contains configuration and desired state.
 
 Backrest protects persistent runtime data.
 
-## 5. Secrets belong in Bitwarden Secrets Manager
+## 5. Secrets: Bitwarden is the source of truth; SOPS ciphertext for named stacks
 
-Sensitive values live in Bitwarden Secrets Manager and are injected by Dockhand at deploy time. Compose files reference them only as `${VAR}`.
+Sensitive values live in Bitwarden Secrets Manager. Compose files reference them only as `${VAR}`.
 
-Secrets are never committed, encrypted or not.
+- **Default:** Dockhand injects them at deploy time from Bitwarden Secrets Manager. Nothing is committed.
+- **Exception, named stacks only:** a stack whose deploy must not depend on the network keeps its values in a SOPS/age-encrypted `secrets.sops.env` next to its `compose.yaml`, and Dockhand decrypts it locally with its SOPS (age) provider. The stacks allowed to do this:
+
+  | Stack | File | Values |
+  |---|---|---|
+  | `compose/infrastructure/tailscale` | `secrets.sops.env` | `TS_AUTHKEY`, `TS_ROUTES` |
+
+  Adding a stack to this table is a reviewed change.
+- **Never committed:** plaintext secrets (including a decrypted `secrets.sops.env`), age private keys (`AGE-SECRET-KEY-…`), or a `*.sops.env` anywhere else.
+- **Bitwarden stays the source of truth.** Change a value in Bitwarden first, then mirror it into the encrypted file.
+- Only Rock creates or edits ciphertext, on his workstation, with the rules in `.sops.yaml`. `scripts/check-sops-files.sh` runs in the pre-commit hook and in CI and fails on anything that isn't fully encrypted.
+- **Ciphertext in a public repository is permanent.** Anyone who later gets a recipient's private key can read every value ever committed. If an age private key, the Dockhand data directory (`/srv/homelab/dockhand/data`) or any backup of it is exposed, **rotate the secrets themselves** (a new Tailscale auth key and every other value in the file), then re-encrypt. `sops updatekeys` and `sops rotate` don't protect old commits.
 
 ## 6. Prefer explicitness over abstraction
 
@@ -1019,6 +1030,8 @@ Is it application configuration?
 Is it sensitive configuration?
         │
         ├── Yes → Bitwarden Secrets Manager, injected by Dockhand
+        │         (named outage-critical stacks: also a SOPS-encrypted
+        │          secrets.sops.env, see Guiding Principles §5)
         │
         └── No
              │
@@ -1036,7 +1049,7 @@ The goal is to make it immediately apparent:
 
 1. **What runs?** → `compose/`
 2. **How is it configured?** → the stack's `compose.yaml` plus its data on the host
-3. **What secrets does it require?** → the `${VAR}`s in its `compose.yaml` (values in Bitwarden Secrets Manager)
+3. **What secrets does it require?** → the `${VAR}`s in its `compose.yaml` (values in Bitwarden Secrets Manager; for the stacks named in Guiding Principles §5, also encrypted in its `secrets.sops.env`)
 4. **What does the host/external environment provide?** → `infrastructure/`
 5. **How does it work?** → `README.md` and `AGENTS.md`
 

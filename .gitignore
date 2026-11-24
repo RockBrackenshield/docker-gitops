@@ -33,7 +33,15 @@ Desktop.ini
 # IMPORTANT:
 # Secrets are injected at deploy time by Dockhand (Bitwarden Secrets
 # Manager) and referenced in compose files as ${VAR}. Never commit
-# real secret values or local env files.
+# plaintext secret values or local env files.
+# Exception: SOPS/age-encrypted `secrets.sops.env` files for the stacks
+# named in infrastructure/README.md (Guiding Principles, section 5) are
+# committed on purpose. Bitwarden remains the source of truth.
+
+# Plaintext work files next to an encrypted secrets.sops.env
+secrets.env
+*.dec.env
+*.plain.env
 
 *.secret
 *.secret.yaml

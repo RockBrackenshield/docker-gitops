@@ -43,7 +43,7 @@ Two Raspberry Pi 4Bs, each running Docker:
 
 ## How it runs
 
-- **Deployments and secrets:** Dockhand deploys the stacks. Secrets live in Bitwarden Secrets Manager and Dockhand injects them at deploy time; the compose files only reference them as `${VAR}`. Nothing secret is committed.
+- **Deployments and secrets:** Dockhand deploys the stacks. Secrets live in Bitwarden Secrets Manager and Dockhand injects them at deploy time; the compose files only reference them as `${VAR}`. Nothing secret is committed in plaintext. Outage-critical stacks (Tailscale) keep SOPS/age-encrypted values next to their compose file, which Dockhand decrypts locally; Bitwarden remains the source of truth.
 - **Backups:** Backrest runs on both nodes and backs up the persistent data on the host. App data never goes in Git.
 - **Remote access:** Tailscale only.
 - **Updates:** Renovate (hosted app) opens pull requests for image updates; nothing automerges.
