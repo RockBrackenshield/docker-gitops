@@ -111,6 +111,11 @@ runcmd:
   # one-off exception to the repo's no-IPs rule (Rock, Nov 24, 2026); source:
   # https://quad9.net/service/service-addresses-and-features/ ("Recommended").
   # FallbackDNS= would never apply here (DHCP always supplies a server).
+  # With systemd-resolved, the stub is off and resolved's uplink resolv.conf has
+  # no `options` line (it can't carry a timeout), and glibc asks the servers in
+  # order with a 5 s default timeout. So /etc/resolv.conf becomes a symlink to a
+  # static file with `options timeout:2 attempts:2`; resolved treats it as a
+  # foreign resolv.conf, and NetworkManager leaves a symlinked resolv.conf alone.
   - - bash
     - -c
     - |
@@ -123,6 +128,10 @@ runcmd:
         install -d -m 0755 /etc/systemd/resolved.conf.d
         printf '[Resolve]\nDNS=%s 9.9.9.9 149.112.112.112\n' "$adguard" \
           > /etc/systemd/resolved.conf.d/20-homelab-dns.conf
+        printf 'nameserver %s\nnameserver 9.9.9.9\nnameserver 149.112.112.112\noptions timeout:2 attempts:2\n' "$adguard" \
+          > /etc/resolv.conf.homelab
+        chmod 0644 /etc/resolv.conf.homelab
+        ln -sfn /etc/resolv.conf.homelab /etc/resolv.conf
         systemctl restart systemd-resolved
       elif systemctl is-active --quiet NetworkManager; then
         install -d -m 0755 /etc/NetworkManager/conf.d
