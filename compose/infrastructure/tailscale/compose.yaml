@@ -13,7 +13,10 @@ services:
     environment:
       - TS_AUTHKEY=${TS_AUTHKEY}
       - TS_STATE_DIR=/var/lib/tailscale
-      - TS_ROUTES=${TS_ROUTES}          # comma-separated CIDRs, e.g. 192.0.2.0/24,198.51.100.0/24
+      # Required: if the secret provider can't supply it (for example a Dockhand
+      # Recreate that falls back to on-disk values), Compose fails instead of
+      # starting Tailscale with no subnet routes.
+      - TS_ROUTES=${TS_ROUTES:?TS_ROUTES is not set (secret provider)}          # comma-separated CIDRs, e.g. 192.0.2.0/24,198.51.100.0/24
       - TS_EXTRA_ARGS=--advertise-exit-node
       # containerboot's /healthz (200 once the node has a tailnet IP, else 503).
       # Loopback only: with network_mode: host the default [::]:9002 would listen
