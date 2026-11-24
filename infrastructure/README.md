@@ -832,6 +832,68 @@ All clients use the admin account, with one 365-day token per device (section 6)
 
 ---
 
+# Secret providers for Tailscale and AdGuard (infrastructure)
+
+During an outage the infrastructure node can lose DNS and Bitwarden at the same time, and a Bitwarden-bound stack then can't be started from Dockhand. So the two stacks that matter most in an outage don't use Bitwarden at deploy time:
+
+- **Tailscale** uses Dockhand's **SOPS (age)** provider with the encrypted `compose/infrastructure/tailscale/secrets.sops.env` (`TS_AUTHKEY`, `TS_ROUTES`). Decryption is local, so it needs no network. `TS_AUTHKEY` is still injected on every deploy (Rock's choice, Nov 20, 2026).
+- **AdGuard** uses **no provider**. Its `compose.yaml` references no `${VAR}`, so it needs no secrets, and with no provider bound no lifecycle action calls Bitwarden for it.
+
+Bitwarden Secrets Manager stays the source of truth for the values ([Guiding Principles §5](#5-secrets-bitwarden-is-the-source-of-truth-sops-ciphertext-for-named-stacks)). Key generation, storage, rotation and recovery are in [`host/README.md`](../host/README.md#sops-age-keys-infrastructure).
+
+## 1. The encrypted file (Rock, workstation, after the guards are on `main`)
+
+1. Fill in both age public keys in `.sops.yaml` (see `host/README.md`).
+2. `git config core.hooksPath .githooks` in your clone.
+3. From the repository root: `sops edit compose/infrastructure/tailscale/secrets.sops.env`, and enter `TS_AUTHKEY=` and `TS_ROUTES=` with the values from Bitwarden.
+4. `bash scripts/check-sops-files.sh --all`, then commit and push through a pull request.
+
+## 2. Dockhand provider (Settings → Secrets)
+
+Add a provider of type **SOPS (age)**, named `sops-infrastructure`, and paste the **Dockhand** age identity (the private key from the Bitwarden vault item "age dockhand-infrastructure"). Never paste the offline recovery key.
+
+## 3. Tailscale stack
+
+In the stack's settings:
+
+1. **Secret provider** = `sops-infrastructure`. A stack has one provider, so this replaces Bitwarden.
+2. **Env file** = `compose/infrastructure/tailscale/secrets.sops.env`. It must be inside the stack's compose directory.
+3. Delete the stack's `DOCKHAND_SECRET_SELECTOR` variable if one is set. With SOPS bound it only logs a warning, but it's confusing.
+4. Delete any `TS_AUTHKEY` or `TS_ROUTES` **stack variable** in Dockhand. A stack variable with the same name wins over the decrypted value.
+5. **Deploy once while online.** The deploy copies the encrypted file into the local stack directory, which is what Start and Recreate read later without the network.
+
+## 4. AdGuard stack
+
+**Secret provider** = none, and delete any `DOCKHAND_SECRET_SELECTOR` variable. No env file.
+
+## 5. Check the binding after every deploy
+
+An unbound stack deploys the raw `ENC[…]` strings with only a log warning. After each deploy of the tailscale stack:
+
+- `docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' tailscale | grep -c 'ENC\[AES256_GCM'` prints `0` (a count only, never values).
+- The deploy log shows `SOPS (age) decrypted 2 secret(s) from the env file`, and not `The env file is SOPS-encrypted but no SOPS secret provider is bound to this stack`.
+- `docker exec tailscale tailscale status` is logged in, and the subnet routes are advertised (admin console).
+
+## 6. During a network outage
+
+What each Dockhand action does when GitHub, DNS or the internet is down (Dockhand v1.0.58):
+
+| Action | Touches git? | Secret provider |
+|---|---|---|
+| **Deploy**, **Sync**, webhook, scheduled sync | Yes: it deletes its clone and clones again **before** anything else, so it fails with `Git clone failed`. Running containers are left alone. | Not reached |
+| **Start** | No: it uses the local stack directory from the last successful deploy | Required. SOPS decrypts locally and works. A Bitwarden-bound stack fails with `Failed to load secrets from provider`. |
+| **Restart**, **Restart → Recreate**, **Stop** | No | Best effort. If the provider fails (Bitwarden unreachable, or SOPS can't decrypt), Dockhand logs `Provider secret resolution failed, proceeding without provider secrets` and carries on with only the values on disk (the stack's `.env`) and the stack variables stored in Dockhand. Any value only the provider supplies is then unset for that run. |
+| Container start/restart (container page), `docker start`/`docker restart` on the host, reboot | No | None: Docker reuses the container's stored configuration |
+
+So, during an outage:
+
+- **Never use Deploy or Sync.** They fail at the clone.
+- Use the stack's **Start** or **Restart → Recreate**, or on the host `docker start <container>` / `docker restart <container>`.
+- After a Recreate of the tailscale stack, check the routes are still advertised (`docker exec tailscale tailscale status`, admin console). Prefer Start when unsure: it fails instead of running without values.
+- Don't **Down** or `docker compose down` an outage-critical stack: bringing it back needs the local stack directory and a working provider.
+
+---
+
 # Rebuilding a node
 
 The files are in [`host/`](../host/README.md); its README has the details for each step. Values in `<angle brackets>` are placeholders.
