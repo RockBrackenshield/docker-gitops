@@ -2,7 +2,7 @@ services:
   shelfmark-lite:
   #shelfmark:
     #image: ghcr.io/calibrain/shelfmark:latest
-    image: ghcr.io/calibrain/shelfmark-lite:v1.7.0@sha256:b8bbc8ae26282c9cc765162719d2090142edf6c93c01c1eb430e51b1fa746ef2
+    image: ghcr.io/calibrain/shelfmark-lite:v1.7.2@sha256:41cdbbf9ff0d568b9fbbcb70a4d996d01f0e5f28fb7b04a97276fbd9fd50638e
     container_name: shelfmark-lite
     #container_name: shelfmark
     environment:
