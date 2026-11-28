@@ -131,7 +131,9 @@ A fresh Dockhand has authentication off and publishes `3000` on every
 interface, so `firewall.env` starts with `DOCKHAND_3000=lock`: only loopback
 reaches `:3000`, and the early unit re-applies that at every boot. Reach the UI
 with `ssh -L 3000:127.0.0.1:3000 <admin-user>@infrastructure`, turn on
-authentication, bind the stacks to their projects, then:
+authentication, bind the stacks (Tailscale to the SOPS provider, AdGuard to
+none, the rest to their Bitwarden projects; see
+[`infrastructure/README.md`](../infrastructure/README.md#secret-providers-for-tailscale-and-adguard-infrastructure)), then:
 
 ```bash
 sudo /srv/homelab/docker-gitops/host/bootstrap.sh --unlock-dockhand
@@ -142,6 +144,98 @@ to confirm the audit (exactly one user; no API tokens, OIDC providers or
 webhooks; no Hawser tokens yet, because core's agent token is created after the
 unlock), then switches the marker to `allowlist`: from then on only loopback
 and Zoraxy reach `:3000`, permanently. There is no "open" state.
+
+## SOPS age keys (infrastructure)
+
+The tailscale stack's `secrets.sops.env` is encrypted to **two** age
+recipients (Rock, Nov 20, 2026): Dockhand's identity and an offline recovery
+identity. Wiring in Dockhand and the outage runbook are in
+[`infrastructure/README.md`](../infrastructure/README.md#secret-providers-for-tailscale-and-adguard-infrastructure).
+
+**Make the keys (workstation, once).** `sops` and `age` are installed on the
+workstation only, never on a node.
+
+```bash
+age-keygen -o dockhand-infrastructure.agekey   # prints "Public key: age1..."
+age-keygen -o offline-recovery.agekey
+```
+
+- Store each private key in its own Bitwarden **vault** item (not Secrets
+  Manager): "age dockhand-infrastructure" and "age offline-recovery". Also
+  keep the offline one on paper or USB, away from the nodes. Then delete both
+  files (`*.agekey` is gitignored anyway).
+- Put the two **public** keys (`age1…`) into `.sops.yaml` in place of the
+  `<AGE_PUBKEY_…>` placeholders.
+
+**Where they live.**
+
+| Key | Lives in | Never in |
+|---|---|---|
+| Dockhand identity | Dockhand's database (wrapped by `data/.encryption_key`) and its Bitwarden vault item | Git, Backrest snapshots, any other file on a node |
+| Offline recovery identity | Bitwarden vault item, paper or USB | any node, Dockhand |
+| Public keys | `.sops.yaml` | |
+
+**How the Dockhand identity gets into Dockhand.** Paste it into the SOPS
+(age) provider in the UI at rebuild step 8. `bootstrap.sh` doesn't handle it:
+automating that would put the private key on the node at bootstrap time.
+
+**Protect Dockhand's data directory.** It holds the encryption key that
+unwraps the identity, so it is root-only and stays out of backups.
+
+```bash
+sudo docker top dockhand -eo uid,comm             # every process should show uid 0
+sudo chmod 0700 /srv/homelab/dockhand/data        # only if they all do
+sudo stat -c '%U %a' /srv/homelab/dockhand/data   # expect: root 700
+```
+
+If Dockhand runs as another UID (a `PUID` setting), keep that owner and still
+use `0700`. New nodes get `0700 root:root` from `user-data`.
+
+Two different keys are involved; don't mix them up:
+
+- **The age identity** (`AGE-SECRET-KEY-…`) decrypts `secrets.sops.env`. It's
+  pasted into the SOPS (age) provider and stored in Dockhand's database.
+- **Dockhand's own encryption key** wraps every secret in that database,
+  including the age identity. By default it's the file
+  `/srv/homelab/dockhand/data/.encryption_key` (`0600`, created on first
+  start). If the container is given an `ENCRYPTION_KEY` environment variable
+  instead, Dockhand uses that, deletes the file and keeps the key only in
+  memory (Dockhand v1.0.58 `src/lib/server/encryption.ts`, lines 49-60 and
+  150-156). This repo's Dockhand stack sets no `ENCRYPTION_KEY`, so the file is
+  used: that's why the data directory is `0700` and excluded from Backrest.
+  Switching to `ENCRYPTION_KEY` would take the key out of data-directory
+  backups, but it then shows in `docker inspect` and has to come from a
+  root-only host file at every start. Decide it on purpose; it isn't changed
+  here.
+
+Backrest mounts all of `/srv/homelab` read-only, so in the infrastructure
+node's Backrest plan UI **exclude `/srv/homelab/dockhand/data`**, then check
+that a snapshot's file listing shows no `dockhand/data`. Backrest's repository
+password is on the same node, so a snapshot with the data directory would
+carry the key with it.
+
+**Rotation.**
+
+- New value (for example a new auth key): change it in Bitwarden first, then
+  `sops edit compose/infrastructure/tailscale/secrets.sops.env` from the repo
+  root, and also `sops rotate -i <file>` so the file gets a new data key
+  (Malis S4). Commit through a pull request, and Deploy (online).
+- New recipient: update `.sops.yaml`, then `sops updatekeys <file>` and
+  `sops rotate -i <file>` (new data key), commit, and paste the new Dockhand
+  identity into the provider if it changed. Old commits stay readable to the
+  old keys, so if a recipient is **removed** because it's no longer trusted,
+  rotate the secret values themselves too (a new Tailscale auth key):
+  re-keying alone doesn't take back what the old key can already read.
+
+**Recovery.**
+
+- Node lost: rebuild, then paste the Dockhand identity from Bitwarden.
+- Dockhand identity lost: on the workstation, decrypt with the offline key
+  (`SOPS_AGE_KEY_FILE=<offline-key-file> sops decrypt …`), make a new Dockhand
+  identity, update `.sops.yaml`, `sops updatekeys` + `sops rotate -i`, commit,
+  and paste the new identity into Dockhand.
+- Dockhand identity **exposed**: as above, and rotate the values themselves
+  (see Rollback).
 
 ## Firewall
 
@@ -183,12 +277,13 @@ and Zoraxy reach `:3000`, permanently. There is no "open" state.
 - Dockhand: `docker compose -p dockhand down`; for a clean start, move `/srv/homelab/dockhand/data` aside **and** set `DOCKHAND_3000=lock` in `/etc/homelab/firewall.env`, then `sudo homelab-firewall.sh --early`, before the next start.
 - sudo: `sudo visudo -f /etc/sudoers.d/90-cloud-init-users` (keep a second session open).
 - Secrets: revoke the bootstrap token; rotate `DOCKHAND_BWS_ACCESS_TOKEN`, core's Hawser token and the Tailscale auth key if they might be exposed.
-- Lost or imaged card: treat it as a full rotation (Dockhand's provider token and key, every injected value in container configs, the Tailscale node key and auth key, Backrest's `config.json`, ntfy tokens, the SMB password, SSH host keys, core's Hawser token).
+- Lost or imaged card: treat it as a full rotation (Dockhand's provider token and key, the Dockhand age identity, every injected value in container configs, the Tailscale node key and auth key, Backrest's `config.json`, ntfy tokens, the SMB password, SSH host keys, core's Hawser token).
+- Dockhand age identity exposed (the key, `/srv/homelab/dockhand/data`, or any backup of it): rotate the **values** in `secrets.sops.env` (a new Tailscale auth key; treat `TS_ROUTES` as known), make a new Dockhand identity and re-encrypt. Re-encrypting alone doesn't help: the old ciphertext stays readable in Git history.
 
 ## Accepted risks (Rock, Nov 11, 2026)
 
 - **Tailscale setup unchanged.** Rock: "No, keep the Tailscale setup as it is". No `TS_AUTH_ONCE` and no tagged or one-off key requirement. containerboot therefore runs `tailscale up` on every container start, and passes `--authkey=<value>` on that command's argv whenever `TS_AUTHKEY` is set.
-- **`TS_AUTHKEY` stays in Dockhand's Bitwarden project.** Rock: "Leave TS_AUTHKEY in Dockhand's Bitwarden project as it is". So the key is reused on every container start, is visible in `docker inspect` and in the container's command line, and, if the key is untagged, the node's key expires after 180 days unless key expiry is turned off for that machine in the Tailscale admin console (which would otherwise drop the subnet routes).
+- **`TS_AUTHKEY` is injected on every deploy.** Rock: "Leave TS_AUTHKEY in Dockhand's Bitwarden project as it is" (Nov 11), and on Nov 20 "keep the auth key being injected every deploy" when the stack moved to SOPS. Dockhand now injects it from the SOPS-encrypted `compose/infrastructure/tailscale/secrets.sops.env`; Bitwarden stays the source of truth. So the key is reused on every container start, is visible in `docker inspect` and in the container's command line, and, if the key is untagged, the node's key expires after 180 days unless key expiry is turned off for that machine in the Tailscale admin console (which would otherwise drop the subnet routes).
 
 ## Not here yet
 

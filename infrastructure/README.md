@@ -86,7 +86,7 @@ docker-gitops/
     └── Rules for agents working in the repository
 ```
 
-Secrets are not stored in the repository. Dockhand injects them at deploy time from Bitwarden Secrets Manager, and compose files reference them as `${VAR}`.
+Plaintext secrets are not stored in the repository. Dockhand injects them at deploy time from Bitwarden Secrets Manager, and compose files reference them as `${VAR}`. The one exception is SOPS/age-encrypted `secrets.sops.env` files for the outage-critical stacks named in [Guiding Principles §5](#5-secrets-bitwarden-is-the-source-of-truth-sops-ciphertext-for-named-stacks); Dockhand decrypts those locally.
 
 The dependency relationship is approximately:
 
@@ -832,6 +832,68 @@ All clients use the admin account, with one 365-day token per device (section 6)
 
 ---
 
+# Secret providers for Tailscale and AdGuard (infrastructure)
+
+During an outage the infrastructure node can lose DNS and Bitwarden at the same time, and a Bitwarden-bound stack then can't be started from Dockhand. So the two stacks that matter most in an outage don't use Bitwarden at deploy time:
+
+- **Tailscale** uses Dockhand's **SOPS (age)** provider with the encrypted `compose/infrastructure/tailscale/secrets.sops.env` (`TS_AUTHKEY`, `TS_ROUTES`). Decryption is local, so it needs no network. `TS_AUTHKEY` is still injected on every deploy (Rock's choice, Nov 20, 2026).
+- **AdGuard** uses **no provider**. Its `compose.yaml` references no `${VAR}`, so it needs no secrets, and with no provider bound no lifecycle action calls Bitwarden for it.
+
+Bitwarden Secrets Manager stays the source of truth for the values ([Guiding Principles §5](#5-secrets-bitwarden-is-the-source-of-truth-sops-ciphertext-for-named-stacks)). Key generation, storage, rotation and recovery are in [`host/README.md`](../host/README.md#sops-age-keys-infrastructure).
+
+## 1. The encrypted file (Rock, workstation, after the guards are on `main`)
+
+1. Fill in both age public keys in `.sops.yaml` (see `host/README.md`).
+2. `git config core.hooksPath .githooks` in your clone.
+3. From the repository root: `sops edit compose/infrastructure/tailscale/secrets.sops.env`, and enter `TS_AUTHKEY=` and `TS_ROUTES=` with the values from Bitwarden.
+4. `bash scripts/check-sops-files.sh --all`, then commit and push through a pull request.
+
+## 2. Dockhand provider (Settings → Secrets)
+
+Add a provider of type **SOPS (age)**, named `sops-infrastructure`, and paste the **Dockhand** age identity (the private key from the Bitwarden vault item "age dockhand-infrastructure"). Never paste the offline recovery key.
+
+## 3. Tailscale stack
+
+In the stack's settings:
+
+1. **Secret provider** = `sops-infrastructure`. A stack has one provider, so this replaces Bitwarden.
+2. **Env file** = `compose/infrastructure/tailscale/secrets.sops.env`. It must be inside the stack's compose directory.
+3. Delete the stack's `DOCKHAND_SECRET_SELECTOR` variable if one is set. With SOPS bound it only logs a warning, but it's confusing.
+4. Delete any `TS_AUTHKEY` or `TS_ROUTES` **stack variable** in Dockhand. A stack variable with the same name wins over the decrypted value.
+5. **Deploy once while online.** The deploy copies the encrypted file into the local stack directory, which is what Start and Recreate read later without the network.
+
+## 4. AdGuard stack
+
+**Secret provider** = none, and delete any `DOCKHAND_SECRET_SELECTOR` variable. No env file.
+
+## 5. Check the binding after every deploy
+
+An unbound stack deploys the raw `ENC[…]` strings with only a log warning. `${VAR:?}` doesn't catch that: an `ENC[…]` string isn't empty. The same would happen in the unlikely case that a best-effort Restart/Recreate fails to decrypt locally while the encrypted file is the env file Compose reads. After each deploy (and any Recreate) of the tailscale stack:
+
+- `docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' tailscale | grep -c 'ENC\[AES256_GCM'` prints `0` (a count only, never values).
+- The deploy log shows `SOPS (age) decrypted 2 secret(s) from the env file`, and not `The env file is SOPS-encrypted but no SOPS secret provider is bound to this stack`.
+- `docker exec tailscale tailscale status` is logged in, and the subnet routes are advertised (admin console).
+
+## 6. During a network outage
+
+What each Dockhand action does when GitHub, DNS or the internet is down (Dockhand v1.0.58):
+
+| Action | Touches git? | Secret provider |
+|---|---|---|
+| **Deploy**, **Sync**, webhook, scheduled sync | Yes: it deletes its clone and clones again **before** anything else, so it fails with `Git clone failed`. Running containers are left alone. | Not reached |
+| **Start** | No: it uses the local stack directory from the last successful deploy | Required. SOPS decrypts locally and works. A Bitwarden-bound stack fails with `Failed to load secrets from provider`. |
+| **Restart**, **Restart → Recreate**, **Stop** | No | Best effort. If the provider fails (Bitwarden unreachable, or SOPS can't decrypt), Dockhand logs `Provider secret resolution failed, proceeding without provider secrets` and carries on with only the values on disk (the stack's `.env`) and the stack variables stored in Dockhand. Any value only the provider supplies is then unset for that run. |
+| Container start/restart (container page), `docker start`/`docker restart` on the host, reboot | No | None: Docker reuses the container's stored configuration |
+
+So, during an outage:
+
+- **Never use Deploy or Sync.** They fail at the clone.
+- Use the stack's **Start** or **Restart → Recreate**, or on the host `docker start <container>` / `docker restart <container>`.
+- After a Recreate of the tailscale stack, check the routes are still advertised (`docker exec tailscale tailscale status`, admin console). Prefer Start when unsure: it fails instead of running without values.
+- Don't **Down** or `docker compose down` an outage-critical stack: bringing it back needs the local stack directory and a working provider.
+
+---
+
 # Rebuilding a node
 
 The files are in [`host/`](../host/README.md); its README has the details for each step. Values in `<angle brackets>` are placeholders.
@@ -843,11 +905,11 @@ The files are in [`host/`](../host/README.md); its README has the details for ea
 5. **Restore** from Backrest if needed (restore runbook, separate).
 6. **Check the clone with the OS's git**, then run `sudo /srv/homelab/docker-gitops/host/bootstrap.sh` on the node, or `ssh -t <admin-user>@<node> 'sudo /srv/homelab/docker-gitops/host/bootstrap.sh'`.
 7. **Revoke the bootstrap access token** right after the run.
-8. **Dockhand takes over** (infrastructure). Tunnel to the UI (`ssh -L 3000:127.0.0.1:3000 <admin-user>@infrastructure`), turn on authentication, run `bootstrap.sh --unlock-dockhand`, bind each stack to its Bitwarden project, and deploy in order: AdGuard, Zoraxy, Tailscale (`docker compose -p tailscale down` first, then deploy it from Dockhand), ntfy, Backrest. Core's stacks follow through Hawser once its separate review is done.
-9. **Manual steps that stay manual:** the printer (section 7 above), the tailnet policy (section 5), Zoraxy rules and access lists, ntfy users and device tokens, Backrest's ntfy token file, hooks and plans, Paperless first-start cleanup (section 9).
+8. **Dockhand takes over** (infrastructure). Tunnel to the UI (`ssh -L 3000:127.0.0.1:3000 <admin-user>@infrastructure`), turn on authentication, run `bootstrap.sh --unlock-dockhand`, add the SOPS (age) provider (paste the Dockhand identity from Bitwarden), bind Tailscale to it with env file `compose/infrastructure/tailscale/secrets.sops.env`, bind AdGuard to no provider and the rest to their Bitwarden projects ([details](#secret-providers-for-tailscale-and-adguard-infrastructure)), and deploy in order: AdGuard, Zoraxy, Tailscale (`docker compose -p tailscale down` first, then deploy it from Dockhand), ntfy, Backrest. Core's stacks follow through Hawser once its separate review is done.
+9. **Manual steps that stay manual:** Dockhand data directory `0700` and the Backrest exclude for `/srv/homelab/dockhand/data` ([`host/README.md`](../host/README.md#sops-age-keys-infrastructure)), the printer (section 7 above), the tailnet policy (section 5), Zoraxy rules and access lists, ntfy users and device tokens, Backrest's ntfy token file, hooks and plans, Paperless first-start cleanup (section 9).
 10. **Verify** with the checklist in [`host/README.md`](../host/README.md#verify).
 
-Accepted risk (Rock, Nov 11, 2026: "No, keep the Tailscale setup as it is" and "Leave TS_AUTHKEY in Dockhand's Bitwarden project as it is"): once Dockhand deploys the tailscale stack, its auth key is reused on every container start, is visible in `docker inspect` and the container's command line, and, if untagged, the node's key expires after 180 days unless key expiry is turned off for that machine in the Tailscale admin console.
+Accepted risk (Rock, Nov 11, 2026: "No, keep the Tailscale setup as it is" and "Leave TS_AUTHKEY in Dockhand's Bitwarden project as it is"; Nov 20: "keep the auth key being injected every deploy"): once Dockhand deploys the tailscale stack from its SOPS-encrypted env file, its auth key is reused on every container start, is visible in `docker inspect` and the container's command line, and, if untagged, the node's key expires after 180 days unless key expiry is turned off for that machine in the Tailscale admin console.
 
 ---
 
@@ -955,11 +1017,23 @@ Git contains configuration and desired state.
 
 Backrest protects persistent runtime data.
 
-## 5. Secrets belong in Bitwarden Secrets Manager
+## 5. Secrets: Bitwarden is the source of truth; SOPS ciphertext for named stacks
 
-Sensitive values live in Bitwarden Secrets Manager and are injected by Dockhand at deploy time. Compose files reference them only as `${VAR}`.
+Sensitive values live in Bitwarden Secrets Manager. Compose files reference them only as `${VAR}`.
 
-Secrets are never committed, encrypted or not.
+- **Default:** Dockhand injects them at deploy time from Bitwarden Secrets Manager. Nothing is committed.
+- **Exception, named stacks only:** a stack whose deploy must not depend on the network keeps its values in a SOPS/age-encrypted `secrets.sops.env` next to its `compose.yaml`, and Dockhand decrypts it locally with its SOPS (age) provider. The stacks allowed to do this:
+
+  | Stack | File | Values |
+  |---|---|---|
+  | `compose/infrastructure/tailscale` | `secrets.sops.env` | `TS_AUTHKEY`, `TS_ROUTES` |
+
+  Adding a stack to this table is a reviewed change.
+- **Never committed:** plaintext secrets (including a decrypted `secrets.sops.env`), age private keys (`AGE-SECRET-KEY-…`), or a `*.sops.env` anywhere else.
+- **Bitwarden stays the source of truth.** Change a value in Bitwarden first, then mirror it into the encrypted file.
+- Only Rock creates or edits ciphertext, on his workstation, with the rules in `.sops.yaml`. `scripts/check-sops-files.sh` runs in the pre-commit hook and in CI and fails on anything that isn't fully encrypted.
+- **Guards.** Enable the repo's pre-commit hook once per clone with `git config core.hooksPath .githooks`. It runs `scripts/check-sops-files.sh --staged`, and `gitleaks` too if it is already installed (the hook installs nothing). Run `bash scripts/check-sops-files.sh --all` by hand before pushing. The script checks that every `*.sops.env` is at an allowed path, has only `ENC[AES256_GCM,…]` values and comments plus the metadata lines sops writes for an age-only file (each with a value of the expected shape), carries `sops_mac`, uses no partial-encryption setting, is encrypted to exactly the two recipients in `.sops.yaml`, and contains no `tskey-`. It also rejects any other file with `sops` in its name (for example `secrets.sops.yaml`, `.env.sops`, `secrets.sops.env.bak`; `.sops.yaml` and the script itself excepted), and any Tailscale-key-shaped or age-private-key-shaped string in any file. It prints file names and line numbers only, never values.
+- **Ciphertext in a public repository is permanent.** Anyone who later gets a recipient's private key can read every value ever committed. If an age private key, the Dockhand data directory (`/srv/homelab/dockhand/data`) or any backup of it is exposed, **rotate the secrets themselves** (a new Tailscale auth key and every other value in the file), then re-encrypt. `sops updatekeys` and `sops rotate` don't protect old commits.
 
 ## 6. Prefer explicitness over abstraction
 
@@ -1019,6 +1093,8 @@ Is it application configuration?
 Is it sensitive configuration?
         │
         ├── Yes → Bitwarden Secrets Manager, injected by Dockhand
+        │         (named outage-critical stacks: also a SOPS-encrypted
+        │          secrets.sops.env, see Guiding Principles §5)
         │
         └── No
              │
@@ -1036,7 +1112,7 @@ The goal is to make it immediately apparent:
 
 1. **What runs?** → `compose/`
 2. **How is it configured?** → the stack's `compose.yaml` plus its data on the host
-3. **What secrets does it require?** → the `${VAR}`s in its `compose.yaml` (values in Bitwarden Secrets Manager)
+3. **What secrets does it require?** → the `${VAR}`s in its `compose.yaml` (values in Bitwarden Secrets Manager; for the stacks named in Guiding Principles §5, also encrypted in its `secrets.sops.env`)
 4. **What does the host/external environment provide?** → `infrastructure/`
 5. **How does it work?** → `README.md` and `AGENTS.md`
 

@@ -53,6 +53,14 @@ jobs:
           done
           exit "$fail"
 
+      # Fails if any *.sops.env isn't fully SOPS-encrypted to the .sops.yaml
+      # recipients, or if any tracked file holds a Tailscale-key- or
+      # age-private-key-shaped string. Plain bash/git/grep; prints file and line
+      # numbers only, never values.
+      - name: SOPS guard
+        shell: bash
+        run: bash scripts/check-sops-files.sh --all
+
       - name: Check images are digest-pinned
         shell: bash
         run: |

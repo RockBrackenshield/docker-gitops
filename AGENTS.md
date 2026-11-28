@@ -49,6 +49,17 @@ Other files:
   space after `=`) or `KEY: ${VAR}`.
 - Never commit real values, `.env` files or `docker-compose.env`
   (all gitignored).
+- Exception: a SOPS/age-encrypted `secrets.sops.env` is allowed only for the
+  stacks listed in `infrastructure/README.md` (Guiding Principles, section 5).
+  Bitwarden stays the source of truth.
+- Never commit plaintext secrets or an age private key (`AGE-SECRET-KEY-…`).
+  Never create or edit ciphertext that holds real values: Rock does that on
+  his workstation.
+- `scripts/check-sops-files.sh --all` must pass (CI runs it).
+- Secret-handling files:
+  - `.sops.yaml`: SOPS creation rules (age recipients) for `secrets.sops.env`.
+  - `scripts/check-sops-files.sh`: plaintext-secret guard (pre-commit hook and CI).
+  - `.githooks/pre-commit`: runs the guard; enable with `git config core.hooksPath .githooks`.
 
 ## Images
 
