@@ -27,8 +27,13 @@ services:
       - /srv/homelab/adguard/adguard-conf:/opt/adguardhome/conf
       - /srv/homelab/adguard/adguard-work:/opt/adguardhome/work
 
+    # Real DNS check against AdGuard itself on 127.0.0.1:53 with the image's
+    # busybox nslookup (exits 1 on timeout, NXDOMAIN or SERVFAIL). It needs the
+    # local rewrite rule `||healthcheck.home.arpa^$dnsrewrite=NOERROR;A;127.0.0.1`
+    # in AdGuard (infrastructure/README.md), so it doesn't depend on upstream DNS:
+    # an internet outage doesn't mark AdGuard unhealthy.
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:80/ || exit 1"]
+      test: ["CMD", "nslookup", "-type=a", "-timeout=2", "-retry=1", "healthcheck.home.arpa", "127.0.0.1"]
       interval: 10s     # ~ readinessProbe.periodSeconds
       timeout: 5s
       retries: 3        # ~ failureThreshold

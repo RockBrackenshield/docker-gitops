@@ -317,6 +317,24 @@ The important distinction is:
 
 > **Compose manages Docker's network. Infrastructure manages the network Docker is connected to.**
 
+## DNS resilience on the infrastructure node
+
+The infrastructure node runs the LAN's DNS (AdGuard) and remote access (Tailscale), and UniFi hands the node its own address as DNS. So:
+
+- **Host DNS fallback:** the node's own lookups go to its AdGuard first, then Quad9 ([`host/README.md`](../host/README.md#dns-fallback-infrastructure)).
+- **AdGuard healthcheck:** a real DNS query to `127.0.0.1:53` with the image's busybox `nslookup`, answered by a local rewrite rule, so it doesn't go unhealthy just because the upstream internet is down. **Add the rule before deploying this healthcheck**, or AdGuard turns unhealthy: in AdGuard → Filters → Custom filtering rules, add
+
+  ```text
+  ||healthcheck.home.arpa^$dnsrewrite=NOERROR;A;127.0.0.1
+  ```
+
+  and confirm it with Filters → "Check the filtering" for `healthcheck.home.arpa`. The rule lives in AdGuard's config on the host (backed up by Backrest), not in Git. Check: `docker inspect -f '{{.State.Health.Status}}' adguard-home` = `healthy`; a negative test, `docker exec adguard-home nslookup -timeout=2 healthcheck.home.arpa 192.0.2.1` (TEST-NET, unreachable), exits 1.
+- **Tailscale healthcheck:** containerboot's `/healthz` (`TS_ENABLE_HEALTH_CHECK=true`), bound to `TS_LOCAL_ADDR_PORT=127.0.0.1:9002`, polled with the image's busybox `wget`. It's healthy once the node has a tailnet IP. That address persists from state, so the check stays healthy through an internet outage and doesn't detect a control-plane outage. Check that `sudo ss -ltnp | grep ':9002 '` shows only `127.0.0.1:9002`, and that `<infra-lan-ip>:9002` is refused or times out from another LAN host.
+- Docker doesn't restart an unhealthy container; health is for visibility (Dockhand status), not self-healing.
+- **`TS_ROUTES` is required** (`${TS_ROUTES:?…}`). In Dockhand v1.0.58, Restart, Restart → Recreate and Stop resolve the secret provider best-effort: if it fails (Bitwarden unreachable, or SOPS can't decrypt), Dockhand logs `Provider secret resolution failed, proceeding without provider secrets` and falls back to the values on disk (the stack's `.env`) and the stack variables stored in Dockhand. Before, a Recreate in that state started Tailscale with an empty `TS_ROUTES`, which silently withdraws the subnet routes. Now Compose refuses with `TS_ROUTES is not set`, and the running container is left as it was until the provider works again.
+- **During an outage**, never use Deploy or Sync in Dockhand: they re-clone from GitHub first and fail with `Git clone failed` (containers are left alone). Use the stack's Start or Restart → Recreate, or on the host `docker start <container>` / `docker restart <container>`, which reuse the container's stored configuration. `docker compose -p tailscale …` commands run by hand need `TS_ROUTES` set in the environment.
+- Both containers come back on their own after a reboot (`restart: always`), in no guaranteed order. They stay separate stacks: `depends_on` wouldn't apply at reboot or daemon restart anyway, and making Tailscale wait for a healthy AdGuard would block remote access when AdGuard is broken.
+
 ---
 
 # External Docker Resources

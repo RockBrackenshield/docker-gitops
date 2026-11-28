@@ -7,7 +7,7 @@ SD card, without Ansible: cloud-init for first boot, one re-runnable
 
 | File | What it is |
 |---|---|
-| `infrastructure/user-data`, `core/user-data` | cloud-init `#cloud-config` per node. Placeholders only: `<admin-user>`, `<ssh-public-key>`. |
+| `infrastructure/user-data`, `core/user-data` | cloud-init `#cloud-config` per node. Placeholders only: `<admin-user>`, `<ssh-public-key>`, and on infrastructure `<infra-lan-ip>` (DNS fallback, below). |
 | `bootstrap.sh` | Run once on the node after first boot; safe to re-run. Reads secrets with one `bws secret list -o env`, parsed against each node's name allowlist. |
 | `firewall/homelab-firewall.sh` | Validates `/etc/homelab/firewall.env` and applies the node's rules (`--early`, `--docker`, `--check`, `--remove`). |
 | `firewall/homelab-firewall-early.service` | Loads the raw/INPUT rules before the network, Docker and host NFS. `RequiredBy=docker.service nfs-server.service`, so it fails closed. |
@@ -159,6 +159,98 @@ and Zoraxy reach `:3000`, permanently. There is no "open" state.
 - The `DOCKER-USER` layer (`HOMELAB-DOCKER` chain) matches only DNATed traffic to published ports.
 - A broken `firewall.env` fails the early unit, and Docker (including AdGuard DNS) stays down until it's fixed over SSH. Check a copy first with `sudo homelab-firewall.sh --check --env <file>`.
 - **Never `systemctl restart homelab-firewall-early`**: `Requires=` restarts Docker too. Re-apply with `sudo homelab-firewall.sh --early`.
+
+## DNS fallback (infrastructure)
+
+UniFi hands the infrastructure node its **own** address as DNS, so without a
+fallback the node's own lookups (git, Bitwarden, the Tailscale control plane)
+die with its AdGuard container. The node therefore asks its AdGuard first, then
+**Quad9**: `9.9.9.9` and `149.112.112.112`, Quad9's "Recommended" service
+(malware blocking, DNSSEC validation), from
+<https://quad9.net/service/service-addresses-and-features/>. Rock chose Quad9
+and approved hardcoding its public addresses as a one-off exception to the
+no-IPs rule (Nov 24, 2026: "Yes, hardcode Quad 9. I know it breaks the rule,
+but it's for a public, well-documented and known service, so I'm not
+concerned"). Every other address stays a placeholder.
+
+New nodes get it from `user-data` (fill in `<infra-lan-ip>` in your local
+copy; containers start after it, so they pick it up). It fails loudly, and writes nothing, if the placeholder is left or if
+neither resolver stack is active. `FallbackDNS=` isn't used: it only applies
+when no other server is known, and DHCP always supplies one.
+
+**The already-provisioned node (by hand):**
+
+```bash
+systemctl is-active systemd-resolved NetworkManager    # which one is active?
+```
+
+- **systemd-resolved active** (the stub listener is off and `/etc/resolv.conf`
+  points at `/run/systemd/resolve/resolv.conf`, as `user-data` sets it up):
+
+  ```bash
+  printf '[Resolve]\nDNS=<infra-lan-ip> 9.9.9.9 149.112.112.112\n' \
+    | sudo tee /etc/systemd/resolved.conf.d/20-homelab-dns.conf
+  printf 'nameserver <infra-lan-ip>\nnameserver 9.9.9.9\nnameserver 149.112.112.112\noptions timeout:2 attempts:2\n' \
+    | sudo tee /etc/resolv.conf.homelab
+  sudo chmod 0644 /etc/resolv.conf.homelab
+  sudo ln -sfn /etc/resolv.conf.homelab /etc/resolv.conf
+  sudo systemctl restart systemd-resolved
+  cat /etc/resolv.conf     # the three servers in order, then the options line
+  ```
+
+- **NetworkManager active (and resolved not):**
+
+  ```bash
+  printf '[global-dns]\noptions=timeout:2,attempts:2\n\n[global-dns-domain-*]\nservers=<infra-lan-ip>,9.9.9.9,149.112.112.112\n' \
+    | sudo tee /etc/NetworkManager/conf.d/20-homelab-dns.conf
+  sudo nmcli general reload
+  cat /etc/resolv.conf     # <infra-lan-ip> first, then the two Quad9 addresses, and the options line
+  ```
+
+- **Then, either way, restart the containers that need DNS.** Docker reads
+  the host's `resolv.conf` only when a container starts, so running containers
+  keep the old servers until restarted. Do it on site, or from the LAN, because
+  restarting `tailscale` drops remote access for a moment:
+
+  ```bash
+  docker restart dockhand zoraxy ntfy backrest tailscale
+  ```
+
+  AdGuard itself doesn't need a restart.
+
+Use the node's LAN address, not `127.0.0.1`: Docker drops loopback
+nameservers when it builds container DNS from the host's `resolv.conf`, so a
+loopback entry could silently send containers straight to Quad9.
+
+**Check (on site, at a quiet time; LAN clients lose DNS for those seconds):**
+`docker stop adguard-home; getent ahosts github.com; docker start adguard-home`.
+The lookup still resolves.
+
+**How the fallback works.** In both cases `/etc/resolv.conf` lists
+`<infra-lan-ip>`, `9.9.9.9`, `149.112.112.112` in that order, with
+`options timeout:2 attempts:2`, and glibc (and Docker, which copies that file
+into containers) asks them **in order**. If AdGuard isn't listening (container
+stopped), the query is refused at once and glibc moves to Quad9 straight away.
+If AdGuard is up but doesn't answer, glibc waits 2 s (instead of the 5 s default)
+before trying the next server, so a lookup can take a few seconds. glibc reads
+at most three `nameserver` lines, which is why only IPv4 Quad9 is used.
+systemd-resolved can't do this itself: with the stub listener off, its
+`/run/systemd/resolve/resolv.conf` holds only `nameserver` and `search` lines
+(no `options`), so the timeout couldn't be set there.
+
+**Trade-offs.** While the node uses Quad9, its own lookups bypass AdGuard's
+filtering and internal rewrites. The static file on resolved nodes doesn't
+follow DHCP changes (no DHCP search domains either); the node's address is
+fixed anyway. If `libnss-resolve` is ever installed and `resolve` is put in
+`/etc/nsswitch.conf`, lookups would go through systemd-resolved's own server
+handling (the `DNS=` drop-in) instead of this file. LAN clients are
+unaffected: UniFi still hands them AdGuard.
+
+**Rollback.** Delete the `20-homelab-dns.conf` drop-in, and on resolved nodes
+point `/etc/resolv.conf` back with
+`sudo ln -sfn /run/systemd/resolve/resolv.conf /etc/resolv.conf` and delete
+`/etc/resolv.conf.homelab`. Then restart systemd-resolved or
+`sudo nmcli general reload`, and restart the containers as above.
 
 ## Verify
 
